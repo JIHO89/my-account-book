@@ -6,7 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 
-# 1. 페이지 설정 (최상단 고정)
+# 1. 페이지 설정 (최상단)
 st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 
 # 파일 경로
@@ -106,27 +106,29 @@ if check_password():
             
             st.divider()
             
-            # --- [복구된 그래프 섹션] ---
+            # --- [지시하신 원형 그래프 섹션] ---
             col_chart1, col_chart2 = st.columns(2)
             
             with col_chart1:
-                st.write(f"### 📈 수입 vs 지출")
-                summary_df = pd.DataFrame({'구분': ['수입', '지출'], '금액': [t_inc, t_exp]})
-                fig_io = px.bar(summary_df, x='구분', y='금액', color='구분', text_auto=',.0f',
-                                color_discrete_map={'수입': '#A3C4F3', '지출': '#FFCFD2'})
-                st.plotly_chart(fig_io, use_container_width=True)
-
-            with col_chart2:
-                st.write(f"### 📁 대분류별 지출 현황")
-                cat_df = m_df[m_df['지출'] > 0].groupby('대분류')['지출'].sum().reset_index()
-                if not cat_df.empty:
-                    fig_cat = px.bar(cat_df, x='지출', y='대분류', orientation='h', text_auto=',.0f',
-                                     color='대분류', color_discrete_sequence=px.colors.qualitative.Pastel)
-                    fig_cat.update_layout(showlegend=False)
-                    st.plotly_chart(fig_cat, use_container_width=True)
+                st.write(f"### 🍕 지출 비중 (대분류)")
+                exp_df = m_df[m_df['지출'] > 0].groupby('대분류')['지출'].sum().reset_index()
+                if not exp_df.empty:
+                    fig_exp = px.pie(exp_df, values='지출', names='대분류', hole=0.3,
+                                     color_discrete_sequence=px.colors.qualitative.Pastel)
+                    st.plotly_chart(fig_exp, use_container_width=True)
                 else:
                     st.info("이번 달 지출 내역이 없습니다.")
-            # --------------------------
+
+            with col_chart2:
+                st.write(f"### 💰 수입 구성 (소분류)")
+                inc_df = m_df[m_df['수입'] > 0].groupby('소분류')['수입'].sum().reset_index()
+                if not inc_df.empty:
+                    fig_inc = px.pie(inc_df, values='수입', names='소분류', hole=0.3,
+                                     color_discrete_sequence=px.colors.qualitative.Safe)
+                    st.plotly_chart(fig_inc, use_container_width=True)
+                else:
+                    st.info("이번 달 수입 내역이 없습니다.")
+            # ----------------------------------
 
             st.subheader("📝 상세 장부 수정")
             edited_df = st.data_editor(m_df.drop(columns=['연월']), use_container_width=True, num_rows="dynamic")
@@ -137,7 +139,7 @@ if check_password():
                 st.success("저장되었습니다!")
                 st.rerun()
 
-    # 나머지 탭 로직 (중략 - 기존과 동일)
+    # 나머지 탭은 기존 로직 유지
     with tab_cat:
         st.subheader("🔍 대분류별 소분류 상세 지출 비중")
         if not df.empty:
@@ -153,7 +155,6 @@ if check_password():
                         col1, col2 = st.columns(2)
                         with col1: st.plotly_chart(px.pie(sub_df, values="지출", names="소분류", hole=0.3), use_container_width=True)
                         with col2: st.plotly_chart(px.bar(sub_df, x="소분류", y="지출", text_auto=',.0f'), use_container_width=True)
-            else: st.info("지출 내역이 없습니다.")
 
     with tab_year:
         st.subheader("📅 연간 수입/지출 추이")
