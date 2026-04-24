@@ -6,6 +6,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 
+# [필독] 페이지 설정은 코드의 가장 처음에 딱 한 번만 나와야 합니다.
+st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
+
 # 파일 경로
 data_file = "my_account_book.csv"
 config_file = "account_config.json"
@@ -20,9 +23,9 @@ def check_password():
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        st.set_page_config(page_title="🔐 가계부 로그인", layout="centered")
         st.title("🔐 지호 & 정희 가계부")
         st.text_input("비밀번호를 입력하세요", type="password", on_change=password_entered, key="password")
+        st.info("정희님, 팀장님께 공유받은 비밀번호를 입력해주세요.")
         return False
     elif not st.session_state["password_correct"]:
         st.title("🔐 지호 & 정희 가계부")
@@ -47,13 +50,17 @@ if check_password():
             "기타": ["경조사"]
         }
         if os.path.exists(config_file):
-            with open(config_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except: pass
         return {"app_title": "지호 & 정희 통합 가계부", "users": ["지호", "정희"], "categories": default_categories}
 
     def load_data():
         if os.path.exists(data_file):
             df = pd.read_csv(data_file)
+            # 중복 컬럼 제거 및 전처리
+            df = df.loc[:, ~df.columns.duplicated()]
             df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
             df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
             df['날짜'] = pd.to_datetime(df['날짜'], format='mixed', errors='coerce')
@@ -63,7 +70,6 @@ if check_password():
     config = load_config()
     df = load_data()
 
-    st.set_page_config(page_title=config['app_title'], layout="wide")
     st.title(f"💰 {config['app_title']} 💰")
 
     # [사이드바 입력창]
@@ -116,20 +122,26 @@ if check_password():
             df_c = df.copy()
             df_c['연월'] = df_c['날짜'].dt.strftime('%Y-%m')
             sel_m_c = st.selectbox("조회할 달 선택", sorted(df_c['연월'].unique(), reverse=True), key="cat_sel")
+            # 지출이 있는 데이터만 필터링
             c_df = df_c[(df_c['연월'] == sel_m_c) & (df_c['지출'] > 0)]
             
             if not c_df.empty:
+                # 대분류별 지출 합계로 랭킹 산출
                 cat_rank = c_df.groupby("대분류")["지출"].sum().sort_values(ascending=False).reset_index()
                 for _, row in cat_rank.iterrows():
-                    with st.expander(f"📁 {row['대분류']} : {row['지출']:,}원"):
+                    with st.expander(f"📁 {row['대분류']} : {row['지출']:,}원 (클릭해서 상세 보기)"):
                         sub_df = c_df[c_df['대분류'] == row['대분류']].groupby("소분류")["지출"].sum().reset_index()
                         col1, col2 = st.columns(2)
                         with col1:
-                            st.plotly_chart(px.pie(sub_df, values="지출", names="소분류", hole=0.3, title="소분류 비중"), use_container_width=True)
+                            # 원형 그래프
+                            fig_pie = px.pie(sub_df, values="지출", names="소분류", hole=0.3, title="소분류 비중")
+                            st.plotly_chart(fig_pie, use_container_width=True)
                         with col2:
-                            st.plotly_chart(px.bar(sub_df, x="소분류", y="지출", text_auto=',.0f', title="금액 상세"), use_container_width=True)
+                            # 막대 그래프
+                            fig_bar = px.bar(sub_df, x="소분류", y="지출", text_auto=',.0f', title="금액 상세")
+                            st.plotly_chart(fig_bar, use_container_width=True)
             else:
-                st.info("지출 내역이 없습니다.")
+                st.info("선택한 월에 지출 내역이 없습니다. 지출을 먼저 입력해 보세요!")
 
     with tab_year:
         st.subheader("📅 연간 수입/지출 추이")
@@ -141,11 +153,8 @@ if check_password():
             fig = go.Figure()
             fig.add_trace(go.Bar(x=year_summary['월'], y=year_summary['수입'], name='수입', marker_color='#A3C4F3'))
             fig.add_trace(go.Bar(x=year_summary['월'], y=year_summary['지출'], name='지출', marker_color='#FFCFD2'))
-            fig.update_layout(xaxis=dict(tickmode='linear'), barmode='group', title="월별 흐름")
+            fig.update_layout(xaxis=dict(tickmode='linear', title="월"), barmode='group', title="월별 수입/지출 흐름")
             st.plotly_chart(fig, use_container_width=True)
             
-            # 연간 총계 표시
             y_inc, y_exp = year_summary['수입'].sum(), year_summary['지출'].sum()
-            st.info(f" 올해 총 수입: {y_inc:,}원 | 올해 총 지출: {y_exp:,}원 | 누적 잔액: {y_inc - y_exp:,}원")
-        else:
-            st.info("데이터가 없습니다.")
+            st.info(f"✨ 올해 총 수입: {y_inc:,}원 | 총 지출: {y_exp:,}원 | 누적 잔액: {y_inc - y_exp:,}원")
