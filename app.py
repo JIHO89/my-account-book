@@ -6,7 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 
-# 1. 페이지 설정 (최상단)
+# 1. 페이지 설정 (반드시 최상단)
 st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 
 # 파일 경로
@@ -40,10 +40,12 @@ if check_password():
         if os.path.exists(data_file):
             df = pd.read_csv(data_file)
             df = df.loc[:, ~df.columns.duplicated()]
+            # 날짜를 읽을 때 시간 제거 (YYYY-MM-DD)
             df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce').dt.strftime('%Y-%m-%d')
             df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
             df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
-            return df.dropna(subset=['날짜']).sort_values(by='날짜').reset_index(drop=True)
+            # 최신순 정렬
+            return df.dropna(subset=['날짜']).sort_values(by='날짜', ascending=False).reset_index(drop=True)
         return pd.DataFrame(columns=['날짜', '결제자', '대분류', '소분류', '항목', '수입', '지출'])
 
     def load_config():
@@ -70,7 +72,7 @@ if check_password():
 
     st.title(f"💰 {config['app_title']} 💰")
 
-    # [사이드바 입력]
+    # [사이드바 입력창]
     st.sidebar.header("➕ 신규 입력")
     d_in = st.sidebar.date_input("날짜", datetime.now())
     u_in = st.sidebar.selectbox("결제자", config["users"])
@@ -107,7 +109,7 @@ if check_password():
             
             st.divider()
             
-            # 원형 그래프 비중 표시
+            # 원형 그래프 (지출:대분류, 수입:소분류)
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
                 st.write("### 🍕 지출 비중 (대분류)")
@@ -121,9 +123,9 @@ if check_password():
                     st.plotly_chart(px.pie(inc_df, values='수입', names='소분류', hole=0.3, color_discrete_sequence=px.colors.qualitative.Safe), use_container_width=True)
 
             st.subheader("📝 상세 장부 수정")
-            # [수정] 표의 금액 부분에 콤마 포맷(NumberColumn) 명시
+            # --- [콤마 강제 적용 핵심 코드] ---
             edited_df = st.data_editor(
-                m_df.drop(columns=['연월']).sort_values('날짜'),
+                m_df.drop(columns=['연월']).sort_values('날짜', ascending=False),
                 use_container_width=True,
                 num_rows="dynamic",
                 column_config={
@@ -131,17 +133,15 @@ if check_password():
                     "지출": st.column_config.NumberColumn("지출", format="%d")
                 }
             )
-            # 참고: Streamlit의 format="%d"는 설정된 로케일에 따라 자동으로 천 단위 콤마를 찍어줍니다.
             
             if st.button("💾 장부 변경사항 저장"):
                 other_months = df_a[df_a['연월'] != sel_m]
                 final_df = pd.concat([other_months, edited_df], ignore_index=True)
-                final_df = final_df.drop(columns=['연월']).sort_values(by='날짜').reset_index(drop=True)
+                final_df = final_df.drop(columns=['연월']).sort_values(by='날짜', ascending=False).reset_index(drop=True)
                 final_df.to_csv(data_file, index=False)
-                st.success("저장되었습니다!")
+                st.success("저장 완료!")
                 st.rerun()
 
-    # (분류별 통계 및 연간 요약은 이전과 동일하게 유지)
     with tab_cat:
         st.subheader("🔍 대분류별 소분류 상세 지출")
         if not df.empty:
@@ -152,14 +152,14 @@ if check_password():
             if not c_df.empty:
                 cat_rank = c_df.groupby("대분류")["지출"].sum().sort_values(ascending=False).reset_index()
                 for _, row in cat_rank.iterrows():
-                    with st.expander(f"📁 {row['대분류']} : {row['지출']:,}원 (상세보기)"):
+                    with st.expander(f"📁 {row['대분류']} : {row['지출']:,}원"):
                         sub_df = c_df[c_df['대분류'] == row['대분류']].groupby("소분류")["지출"].sum().reset_index()
-                        sub_col1, sub_col2 = st.columns(2)
-                        with sub_col1: st.plotly_chart(px.pie(sub_df, values="지출", names="소분류", hole=0.3), use_container_width=True)
-                        with sub_col2: st.plotly_chart(px.bar(sub_df, x="소분류", y="지출", text_auto=',.0f'), use_container_width=True)
+                        sc1, sc2 = st.columns(2)
+                        with sc1: st.plotly_chart(px.pie(sub_df, values="지출", names="소분류", hole=0.3), use_container_width=True)
+                        with sc2: st.plotly_chart(px.bar(sub_df, x="소분류", y="지출", text_auto=',.0f'), use_container_width=True)
 
     with tab_year:
-        st.subheader("📅 연간 추이")
+        st.subheader("📅 연간 수입/지출 추이")
         if not df.empty:
             df_y = df.copy()
             df_y['월'] = pd.to_datetime(df_y['날짜']).dt.month
@@ -167,5 +167,6 @@ if check_password():
             fig_year = go.Figure()
             fig_year.add_trace(go.Bar(x=year_summary['월'], y=year_summary['수입'], name='수입', marker_color='#A3C4F3'))
             fig_year.add_trace(go.Bar(x=year_summary['월'], y=year_summary['지출'], name='지출', marker_color='#FFCFD2'))
+            fig_year.update_layout(xaxis=dict(tickmode='linear'), barmode='group')
             st.plotly_chart(fig_year, use_container_width=True)
-            st.info(f"✨ 올해 수입: {year_summary['수입'].sum():,}원 | 지출: {year_summary['지출'].sum():,}원")
+            st.info(f"✨ 올해 총 수입: {year_summary['수입'].sum():,}원 | 총 지출: {year_summary['지출'].sum():,}원")
