@@ -34,7 +34,7 @@ def check_password():
     else:
         return True
 
-# --- 3. 메인 로직 시작 (비밀번호 통과 시) ---
+# --- 3. 메인 로직 (비밀번호 통과 시) ---
 if check_password():
     # 데이터 로드 함수
     def load_data():
@@ -66,7 +66,7 @@ if check_password():
 
     st.title(f"💰 {config['app_title']} 💰")
 
-    # --- [사이드바 입력창 복구] ---
+    # --- [사이드바 입력창] ---
     st.sidebar.header("➕ 신규 입력")
     d_in = st.sidebar.date_input("날짜", datetime.now())
     u_in = st.sidebar.selectbox("결제자", config["users"])
@@ -79,4 +79,67 @@ if check_password():
         exp = st.number_input("지출", min_value=0, step=1000)
         if st.form_submit_button("저장하기"):
             formatted_date = d_in.strftime('%Y-%m-%d')
-            new_row = pd.DataFrame([[formatted_date, u_in, m_
+            # [수정 완료] 괄호 짝을 정확히 맞췄습니다.
+            new_row = pd.DataFrame([[formatted_date, u_in, m_in, s_in, item, int(inc), int(exp)]], 
+                                   columns=['날짜', '결제자', '대분류', '소분류', '항목', '수입', '지출'])
+            df = pd.concat([df, new_row], ignore_index=True)
+            df.to_csv(data_file, index=False)
+            st.rerun()
+
+    # --- [메인 탭 구성] ---
+    tab_ana, tab_cat, tab_year = st.tabs(["📊 월별 분석", "🔍 분류별 통계", "📅 연간 요약"])
+
+    # 1. 월별 분석 탭
+    with tab_ana:
+        if not df.empty:
+            df_a = df.copy()
+            df_a['연월'] = df_a['날짜'].str[:7]
+            sel_m = st.selectbox("📅 조회 월 선택", sorted(df_a['연월'].unique(), reverse=True), key="main_sel")
+            m_df = df_a[df_a['연월'] == sel_m].copy()
+            
+            t_inc, t_exp = m_df['수입'].sum(), m_df['지출'].sum()
+            c1, c2, c3 = st.columns(3)
+            c1.metric("월 총 수입", f"{t_inc:,}원")
+            c2.metric("월 총 지출", f"{t_exp:,}원")
+            c3.metric("이번 달 잔액", f"{t_inc - t_exp:,}원")
+            
+            st.divider()
+            
+            # 파스텔톤 원형 그래프
+            col_chart1, col_chart2 = st.columns(2)
+            with col_chart1:
+                st.write("### 🍕 지출 비중 (대분류)")
+                exp_df = m_df[m_df['지출'] > 0].groupby('대분류')['지출'].sum().reset_index()
+                if not exp_df.empty:
+                    st.plotly_chart(px.pie(exp_df, values='지출', names='대분류', hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
+            with col_chart2:
+                st.write("### 💰 수입 구성 (소분류)")
+                inc_df = m_df[m_df['수입'] > 0].groupby('소분류')['수입'].sum().reset_index()
+                if not inc_df.empty:
+                    st.plotly_chart(px.pie(inc_df, values='수입', names='소분류', hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel2), use_container_width=True)
+
+            st.subheader("📝 상세 장부 수정")
+            edited_df = st.data_editor(
+                m_df.drop(columns=['연월']).sort_values('날짜', ascending=False),
+                use_container_width=True,
+                num_rows="dynamic",
+                column_config={
+                    "수입": st.column_config.NumberColumn("수입", format="%d"),
+                    "지출": st.column_config.NumberColumn("지출", format="%d")
+                }
+            )
+            if st.button("💾 변경사항 저장"):
+                other_months = df_a[df_a['연월'] != sel_m]
+                final_df = pd.concat([other_months, edited_df], ignore_index=True)
+                final_df = final_df.drop(columns=['연월']).sort_values(by='날짜', ascending=False).reset_index(drop=True)
+                final_df.to_csv(data_file, index=False)
+                st.success("저장 완료!")
+                st.rerun()
+
+    # 2. 분류별 통계 탭
+    with tab_cat:
+        st.subheader("🔍 대분류별 소분류 상세")
+        if not df.empty:
+            df_c = df.copy()
+            df_c['연월'] = df_c['날짜'].str[:7]
+            sel_m_c
