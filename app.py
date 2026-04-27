@@ -34,15 +34,12 @@ def check_password():
 
 # --- 3. 메인 로직 시작 ---
 if check_password():
-    # 데이터 로드 함수 (순서: 날짜, 대분류, 소분류, 항목, 수입, 지출, 결제자)
     def load_data():
         if os.path.exists(data_file):
             df = pd.read_csv(data_file)
             df = df.loc[:, ~df.columns.duplicated()]
-            # 날짜 형식 정리
             df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
             df = df.dropna(subset=['날짜'])
-            # 숫자 형식 정리
             df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
             df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
             return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
@@ -66,7 +63,7 @@ if check_password():
     
     df = load_data()
 
-    # [레이아웃: 메인 제목 우측에 저장 버튼 배치]
+    # [레이아웃] 제목 옆 저장 버튼 배치
     col_main_title, col_main_btn = st.columns([4, 1])
     with col_main_title:
         st.title(f"💰 {config['app_title']} 💰")
@@ -83,10 +80,9 @@ if check_password():
         inc = st.number_input("수입", min_value=0, step=1000)
         exp = st.number_input("지출", min_value=0, step=1000)
         if st.form_submit_button("저장하기"):
-            new_row = pd.DataFrame([[d_in, m_in, s_in, item, int(inc), int(exp), u_in]], 
+            new_row = pd.DataFrame([[pd.Timestamp(d_in), m_in, s_in, item, int(inc), int(exp), u_in]], 
                                    columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
             df = pd.concat([df, new_row], ignore_index=True)
-            # 날짜를 문자열로 바꿔서 저장
             df_save = df.copy()
             df_save['날짜'] = df_save['날짜'].dt.strftime('%Y-%m-%d')
             df_save.to_csv(data_file, index=False, encoding='utf-8-sig')
@@ -99,11 +95,9 @@ if check_password():
         if not df.empty:
             df_a = df.copy()
             df_a['연월'] = df_a['날짜'].dt.strftime('%Y-%m')
-            all_months = sorted(df_a['연월'].unique(), reverse=True)
-            sel_m = st.selectbox("📅 조회 월 선택", all_months, key="main_sel")
+            sel_m = st.selectbox("📅 조회 월 선택", sorted(df_a['연월'].unique(), reverse=True), key="main_sel")
             m_df = df_a[df_a['연월'] == sel_m].copy()
             
-            # 상단 요약 지표
             c1, c2, c3 = st.columns(3)
             c1.metric("월 총 수입", f"{m_df['수입'].sum():,}원")
             c2.metric("월 총 지출", f"{m_df['지출'].sum():,}원")
@@ -111,7 +105,7 @@ if check_password():
             
             st.divider()
             
-            # [요청: 그래프를 표보다 위로]
+            # [배치] 그래프를 표 위로
             col_chart1, col_chart2 = st.columns(2)
             with col_chart1:
                 st.write("### 🍕 지출 비중 (대분류)")
@@ -126,8 +120,6 @@ if check_password():
 
             st.divider()
             st.subheader("📝 상세 장부 수정")
-            
-            # 날짜를 문자열로 변환하여 에디터에 표시
             m_df_edit = m_df.drop(columns=['연월']).copy()
             m_df_edit['날짜'] = m_df_edit['날짜'].dt.strftime('%Y-%m-%d')
             
@@ -142,19 +134,17 @@ if check_password():
                 key="editor_monthly"
             )
 
-            # [메인 상단 버튼 동작]
+            # [메인 제목 옆 저장 버튼 동작]
             with col_main_btn:
-                st.write(" ") # 간격용
+                st.write(" ")
                 if st.button("💾 변경사항 저장", use_container_width=True, key="save_top"):
-                    # 편집된 날짜 다시 datetime으로 복구
                     edited_df['날짜'] = pd.to_datetime(edited_df['날짜'])
                     other_months = df_a[df_a['연월'] != sel_m].drop(columns=['연월'])
                     final_df = pd.concat([other_months, edited_df], ignore_index=True)
                     final_df = final_df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
-                    # 최종 저장
                     final_df['날짜'] = final_df['날짜'].dt.strftime('%Y-%m-%d')
                     final_df.to_csv(data_file, index=False, encoding='utf-8-sig')
-                    st.success("데이터가 안전하게 저장되었습니다!")
+                    st.success("저장 완료!")
                     st.rerun()
 
     # 2. 분류별 통계
@@ -178,27 +168,29 @@ if check_password():
                             fig_b.update_layout(showlegend=False)
                             st.plotly_chart(fig_b, use_container_width=True)
 
-    # 3. 연간 요약 (이미지 스타일 반영)
+    # 3. 연간 요약 (막대 그래프 스타일)
     with tab_year:
         st.header(f"📅 {datetime.now().year}년 연간 재정 요약")
         if not df.empty:
-            # 연간 총계 지표
-            total_income = df['수입'].sum()
-            total_expense = df['지출'].sum()
-            net_profit = total_income - total_expense
-
+            total_inc = df['수입'].sum()
+            total_exp = df['지출'].sum()
             y_col1, y_col2, y_col3 = st.columns(3)
-            y_col1.metric("연간 총수입", f"{total_income:,.0f}원")
-            y_col2.metric("연간 총지출", f"{total_expense:,.0f}원")
-            y_col3.metric("연간 순이익", f"{net_profit:,.0f}원")
+            y_col1.metric("연간 총수입", f"{total_inc:,.0f}원")
+            y_col2.metric("연간 총지출", f"{total_exp:,.0f}원")
+            y_col3.metric("연간 순이익", f"{total_inc - total_exp:,.0f}원")
 
             st.divider()
-
-            # [요청: 이미지 스타일의 월별 비교 그래프]
             st.subheader("📊 월별 수입 vs 지출 추이")
             df['월'] = df['날짜'].dt.strftime('%m월')
             monthly_data = df.groupby('월')[['수입', '지출']].sum().reindex([f"{i:02d}월" for i in range(1, 13)]).fillna(0).reset_index()
             
             fig_y = go.Figure()
             fig_y.add_trace(go.Bar(x=monthly_data['월'], y=monthly_data['수입'], name='수입', marker_color='#1f77b4'))
-            fig_y.add_trace(go.Bar(x=monthly_data['월'], y=monthly_data['지출'], name='지
+            # [수정 완료] 204번 줄 따옴표 누락 보수
+            fig_y.add_trace(go.Bar(x=monthly_data['월'], y=monthly_data['지출'], name='지출', marker_color='#ff7f0e'))
+            fig_y.update_layout(barmode='group', xaxis_title="월별", yaxis_title="금액(원)", template="plotly_white")
+            st.plotly_chart(fig_y, use_container_width=True)
+
+            st.subheader("📂 연간 카테고리별 지출 비중")
+            year_cat = df[df['지출'] > 0].groupby('대분류')['지출'].sum().reset_index()
+            st.plotly_chart(px.pie(year_cat, values='지출', names='대분류', hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3), use_container_width=True)
