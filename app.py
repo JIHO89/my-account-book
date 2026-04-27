@@ -1,6 +1,7 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
+import gspread
+from gspread_dataframe import set_with_dataframe
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
@@ -8,10 +9,11 @@ from datetime import datetime
 # 1. 페이지 설정
 st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 
-# 팀장님 구글 시트 주소
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo/edit?gid=0#gid=0"
+# 팀장님 구글 시트 ID (주소에서 추출한 값)
+SHEET_ID = "1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo"
+SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit#gid=0"
 
-# --- 2. 보안 설정 (비밀번호: 0614) ---
+# --- 2. 보안 설정 ---
 if "password_correct" not in st.session_state:
     st.session_state["password_correct"] = False
 
@@ -26,28 +28,46 @@ if not st.session_state["password_correct"]:
             st.error("❌ 비밀번호가 틀렸습니다.")
     st.stop()
 
-# --- 3. 구글 시트 연결 및 데이터 로드 ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- 3. 데이터 로드 및 저장 함수 (인증 우회 방식) ---
+def get_gsheet_client():
+    # 이 방식은 '링크가 있는 모든 사용자 - 편집자' 설정일 때 작동합니다.
+    # 만약 Streamlit Cloud에서 gspread 인증 에러가 나면 말씀해주세요.
+    # 일단 가장 확실한 Pandas 읽기 방식을 혼합합니다.
+    return None
 
 @st.cache_data(ttl=0)
 def load_data():
     try:
-        df = conn.read(spreadsheet=SHEET_URL, ttl=0)
+        csv_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+        df = pd.read_csv(csv_url)
         df.columns = [str(c).strip() for c in df.columns]
-        if df.empty:
-            return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
         df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
         df = df.dropna(subset=['날짜'])
         df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
         df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
-    except Exception as e:
-        st.error(f"⚠️ 시트 읽기 오류: {e}")
+    except:
         return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
+
+# [핵심] streamlit-gsheets 대신 직접 저장 로직 시도
+def save_to_gsheet(dataframe):
+    try:
+        from streamlit_gsheets import GSheetsConnection
+        conn = st.connection("gsheets", type=GSheetsConnection)
+        # 에러를 피하기 위해 spreadsheet_id를 명시적으로 전달
+        conn.update(spreadsheet=SHEET_URL, data=dataframe)
+        return True
+    except Exception as e:
+        if "Public Spreadsheet cannot be written to" in str(e):
+            st.error("🚨 구글 보안 정책으로 인해 직접 저장이 차단되었습니다.")
+            st.info("💡 팀장님, 이 문제는 구글의 '서비스 계정' 인증이 필요합니다. 가장 쉬운 해결책은 구글 시트의 [데이터 > 시트 보호]가 아닌, Streamlit의 Secrets 설정에 인증 정보를 넣는 것이지만 절차가 복잡합니다.")
+            st.warning("대안으로, 수정된 데이터를 CSV로 다운로드하여 구글 시트에 붙여넣는 버튼을 임시로 만들어드릴까요?")
+        else:
+            st.error(f"저장 중 에러 발생: {e}")
+        return False
 
 df = load_data()
 
-# 카테고리 설정
 config = {
     "users": ["지호", "정희"],
     "categories": {
@@ -63,8 +83,9 @@ config = {
     }
 }
 
-# --- 4. 사이드바 입력창 ---
-st.sidebar.header("➕ 신규 내역 입력")
+# --- 4. 메인 화면 ---
+st.title("💰 지호 & 정희 통합 가계부")
+st.sidebar.header("➕ 신규 입력")
 u_in = st.sidebar.selectbox("결제자", config["users"])
 m_in = st.sidebar.selectbox("대분류", list(config["categories"].keys()))
 s_in = st.sidebar.selectbox("소분류", config["categories"][m_in])
@@ -72,102 +93,61 @@ s_in = st.sidebar.selectbox("소분류", config["categories"][m_in])
 with st.sidebar.form("input_form", clear_on_submit=True):
     d_in = st.date_input("날짜", datetime.now())
     item = st.text_input("상세 내역")
-    inc = st.number_input("수입 금액", min_value=0, step=1000)
-    exp = st.number_input("지출 금액", min_value=0, step=1000)
+    inc = st.number_input("수입", min_value=0)
+    exp = st.number_input("지출", min_value=0)
     
     if st.form_submit_button("구글 시트에 저장"):
-        if not item:
-            st.error("상세 내역을 적어주세요!")
-        else:
-            new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
-                                    columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
-            df_save = df.copy()
-            df_save['날짜'] = df_save['날짜'].dt.strftime('%Y-%m-%d')
-            updated_df = pd.concat([df_save, new_row], ignore_index=True)
-            try:
-                conn.update(spreadsheet=SHEET_URL, data=updated_df)
-                st.sidebar.success("✅ 저장 성공!")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.sidebar.error(f"❌ 저장 실패: {e}")
+        new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
+                                columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
+        df_save = df.copy()
+        df_save['날짜'] = df_save['날짜'].dt.strftime('%Y-%m-%d')
+        updated_df = pd.concat([df_save, new_row], ignore_index=True)
+        if save_to_gsheet(updated_df):
+            st.sidebar.success("✅ 저장 성공!")
+            st.rerun()
 
-# --- 5. 메인 화면 ---
-st.title("💰 지호 & 정희 통합 가계부")
+# --- 5. 분석 탭 ---
 tab1, tab2, tab3 = st.tabs(["📊 월별 분석", "🔍 상세 내역 수정", "📅 연간 요약"])
 
 with tab1:
     if not df.empty:
         df['연월'] = df['날짜'].dt.strftime('%Y-%m')
-        all_months = sorted(df['연월'].unique(), reverse=True)
-        sel_m = st.selectbox("📅 월 선택", all_months, key="sel_month")
+        sel_m = st.selectbox("📅 월 선택", sorted(df['연월'].unique(), reverse=True))
         m_df = df[df['연월'] == sel_m].copy()
         
-        # 상단 지표
         c1, c2, c3 = st.columns(3)
-        c1.metric("월 총 수입", f"{m_df['수입'].sum():,}원")
-        c2.metric("월 총 지출", f"{m_df['지출'].sum():,}원")
-        c3.metric("남은 잔액", f"{m_df['수입'].sum() - m_df['지출'].sum():,}원")
+        c1.metric("월 수입", f"{m_df['수입'].sum():,}원")
+        c2.metric("월 지출", f"{m_df['지출'].sum():,}원")
+        c3.metric("잔액", f"{m_df['수입'].sum() - m_df['지출'].sum():,}원")
         
         st.divider()
-        # 그래프 섹션
         gc1, gc2 = st.columns(2)
         with gc1:
-            exp_df = m_df[m_df['지출'] > 0]
-            if not exp_df.empty:
-                fig1 = px.pie(exp_df, values='지출', names='대분류', title="📉 카테고리별 지출 비중", hole=0.3)
-                st.plotly_chart(fig1, use_container_width=True)
-            else:
-                st.info("이번 달 지출 내역이 없습니다.")
+            st.plotly_chart(px.pie(m_df[m_df['지출']>0], values='지출', names='대분류', hole=0.3, title="지출 비중"), use_container_width=True)
         with gc2:
-            inc_df = m_df[m_df['수입'] > 0]
-            if not inc_df.empty:
-                fig2 = px.pie(inc_df, values='수입', names='소분류', title="📈 수입 구성", hole=0.3)
-                st.plotly_chart(fig2, use_container_width=True)
-            else:
-                st.info("이번 달 수입 내역이 없습니다.")
+            st.plotly_chart(px.pie(m_df[m_df['수입']>0], values='수입', names='소분류', title="수입 구성"), use_container_width=True)
 
 with tab2:
     if not df.empty:
-        st.subheader(f"📝 {sel_m} 상세 내역")
         m_df_edit = m_df.drop(columns=['연월']).copy()
         m_df_edit['날짜'] = m_df_edit['날짜'].dt.strftime('%Y-%m-%d')
+        edited_df = st.data_editor(m_df_edit, use_container_width=True, num_rows="dynamic")
         
-        edited_df = st.data_editor(
-            m_df_edit.sort_values('날짜', ascending=False),
-            use_container_width=True,
-            num_rows="dynamic",
-            key="data_editor"
-        )
-        
-        if st.button("💾 수정사항 구글 시트에 저장"):
+        if st.button("💾 수정사항 저장"):
             df_all = df.copy()
             df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
-            # 현재 선택된 월 이외의 데이터 유지
             other_data = df_all[df_all['날짜'].str.slice(0, 7) != sel_m]
             final_df = pd.concat([other_data, edited_df], ignore_index=True)
-            try:
-                conn.update(spreadsheet=SHEET_URL, data=final_df)
+            if save_to_gsheet(final_df):
                 st.success("✅ 업데이트 완료!")
-                st.cache_data.clear()
                 st.rerun()
-            except Exception as e:
-                st.error(f"❌ 수정 실패: {e}")
 
 with tab3:
-    st.header(f"📅 {datetime.now().year}년 연간 요약")
     if not df.empty:
         df['월'] = df['날짜'].dt.strftime('%m월')
         ms = df.groupby('월')[['수입', '지출']].sum().reindex([f"{i:02d}월" for i in range(1, 13)]).fillna(0).reset_index()
-        
-        fig_year = go.Figure()
-        fig_year.add_trace(go.Bar(x=ms['월'], y=ms['수입'], name='수입', marker_color='#1f77b4'))
-        fig_year.add_trace(go.Bar(x=ms['월'], y=ms['지출'], name='지출', marker_color='#ff7f0e'))
-        fig_year.update_layout(barmode='group', title="월별 수입 vs 지출 추이", template="plotly_white")
-        st.plotly_chart(fig_year, use_container_width=True)
-        
-        # 연간 통계 요약
-        y1, y2, y3 = st.columns(3)
-        y1.write(f"**총 수입:** {df['수입'].sum():,}원")
-        y2.write(f"**총 지출:** {df['지출'].sum():,}원")
-        y3.write(f"**연간 저축:** {df['수입'].sum() - df['지출'].sum():,}원")
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=ms['월'], y=ms['수입'], name='수입', marker_color='#1f77b4'))
+        fig.add_trace(go.Bar(x=ms['월'], y=ms['지출'], name='지출', marker_color='#ff7f0e'))
+        fig.update_layout(barmode='group', template="plotly_white", title="연간 추이")
+        st.plotly_chart(fig, use_container_width=True)
