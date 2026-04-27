@@ -9,14 +9,17 @@ from datetime import datetime
 st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 
 # --- 2. 구글 시트 연결 (Service Account 자동 인증) ---
-# Secrets에 [connections.gsheets] 설정이 정확하면 자동으로 연결됩니다.
+# Secrets의 [connections.gsheets] 정보를 바탕으로 마스터키를 활성화합니다.
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=0)
 def load_data():
     try:
-        # 인증된 상태이므로 전체 데이터를 읽어옵니다.
-        df = conn.read(ttl=0)
+        # [보완] 주소를 명시적으로 다시 한번 참조하여 읽기 경로를 확실히 합니다.
+        df = conn.read(
+            spreadsheet="https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo",
+            ttl=0
+        )
         df.columns = [str(c).strip() for c in df.columns]
         if df.empty:
             return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
@@ -28,7 +31,9 @@ def load_data():
         df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
     except Exception as e:
+        # 네트워크 일시 오류 시 에러 내용을 더 명확하게 보여줍니다.
         st.error(f"⚠️ 데이터 로드 오류: {e}")
+        st.info("💡 팁: 잠시 후 새로고침(F5)을 하거나, Secrets의 주소 오타를 확인해 주세요.")
         return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
 
 # 데이터 불러오기
@@ -49,7 +54,7 @@ if not st.session_state["password_correct"]:
             st.error("❌ 비밀번호가 틀렸습니다.")
     st.stop()
 
-# 카테고리 구성
+# 카테고리 구성 (팀장님 요청사항 반영)
 config = {
     "users": ["지호", "정희"],
     "categories": {
@@ -84,16 +89,19 @@ with st.sidebar.form("input_form", clear_on_submit=True):
             new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
                                     columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
             
-            # 기존 데이터와 합치기 (날짜 포맷 통일)
+            # 기존 데이터와 합치기
             df_all = df.copy()
             df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
             updated_df = pd.concat([df_all, new_row], ignore_index=True)
             
             try:
-                # [자동화 핵심] 서비스 계정 권한으로 시트 업데이트
-                conn.update(data=updated_df)
+                # [업데이트] 주소를 명시적으로 다시 전달하여 권한을 확실히 합니다.
+                conn.update(
+                    spreadsheet="https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo",
+                    data=updated_df
+                )
                 st.sidebar.success("✅ 저장 완료!")
-                st.cache_data.clear() # 캐시 삭제 후 새로고침
+                st.cache_data.clear() 
                 st.rerun()
             except Exception as e:
                 st.sidebar.error(f"❌ 저장 실패: {e}")
@@ -105,7 +113,8 @@ tab1, tab2, tab3 = st.tabs(["📊 월별 분석", "🔍 상세 내역 수정", "
 with tab1:
     if not df.empty:
         df['연월'] = df['날짜'].dt.strftime('%Y-%m')
-        sel_m = st.selectbox("📅 월 선택", sorted(df['연월'].unique(), reverse=True))
+        all_months = sorted(df['연월'].unique(), reverse=True)
+        sel_m = st.selectbox("📅 월 선택", all_months)
         m_df = df[df['연월'] == sel_m].copy()
         
         c1, c2, c3 = st.columns(3)
@@ -126,18 +135,19 @@ with tab2:
         m_df_edit = m_df.drop(columns=['연월']).copy()
         m_df_edit['날짜'] = m_df_edit['날짜'].dt.strftime('%Y-%m-%d')
         
-        # 표에서 직접 수정 가능
         edited_df = st.data_editor(m_df_edit, use_container_width=True, num_rows="dynamic")
         
         if st.button("💾 변경사항 구글 시트에 즉시 반영"):
             df_all = df.copy()
             df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
-            # 현재 월 제외 데이터 + 현재 월 수정 데이터
             other_data = df_all[df_all['날짜'].str.slice(0, 7) != sel_m]
             final_df = pd.concat([other_data, edited_df], ignore_index=True)
             
             try:
-                conn.update(data=final_df)
+                conn.update(
+                    spreadsheet="https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo",
+                    data=final_df
+                )
                 st.success("✅ 구글 시트 업데이트 완료!")
                 st.cache_data.clear()
                 st.rerun()
