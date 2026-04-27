@@ -31,10 +31,10 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
     try:
-        # 실시간 데이터를 읽어옵니다.
+        # 실시간 데이터를 읽어옵니다 (ttl=0)
         df = conn.read(spreadsheet=SHEET_URL, ttl=0)
         
-        # 컬럼명 공백 제거
+        # 컬럼명 공백 제거 및 문자열 변환
         df.columns = [str(c).strip() for c in df.columns]
         
         if df.empty:
@@ -47,19 +47,20 @@ def load_data():
         df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
     except Exception as e:
-        st.error(f"⚠️ 시트 읽기 오류: {e}")
+        st.error(f"⚠️ 시트 읽기 오류 (공유 설정을 '편집자'로 확인해주세요): {e}")
         return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
 
 df = load_data()
 
+# 가계부 카테고리 설계 (투자/수입 항목 명확화)
 config = {
     "users": ["지호", "정희"],
     "categories": {
+        "투자/수입": ["월급", "실현손익", "배당금", "기타수입"],
         "식비": ["점심", "외식", "식재료", "배달", "간식/커피"],
         "주거/생활": ["월세/대출이자", "관리비", "공과금", "보험료", "가구/가전"],
         "교통/차량": ["대중교통", "주유", "통행료", "차량유지비"],
         "교육/육아": ["학원비", "아이용품", "도서"],
-        "투자/수입": ["월급", "실현손익", "배당금", "기타수입"],
         "꾸밈비": ["의류", "미용", "잡화"],
         "의료비": ["병원", "약국", "영양제"],
         "취미/여가": ["문화생활", "정기결제", "여행"],
@@ -72,25 +73,31 @@ col_t1, col_t2 = st.columns([4, 1])
 with col_t1:
     st.title("💰 지호 & 정희 구글 통합 가계부 💰")
 
-# --- 4. 사이드바 입력창 ---
+# --- 4. 사이드바 입력창 (동적 카테고리 반영) ---
 st.sidebar.header("➕ 신규 내역 입력")
+
+# 대분류 선택을 form 밖으로 빼서 소분류가 즉시 바뀌도록 함
+u_in = st.sidebar.selectbox("결제자", config["users"])
+m_in = st.sidebar.selectbox("대분류", list(config["categories"].keys()))
+s_in = st.sidebar.selectbox("소분류", config["categories"][m_in])
+
 with st.sidebar.form("input_form", clear_on_submit=True):
     d_in = st.date_input("날짜", datetime.now())
-    u_in = st.selectbox("결제자", config["users"])
-    m_in = st.selectbox("대분류", list(config["categories"].keys()))
-    s_in = st.selectbox("소분류", config["categories"][m_in])
     item = st.text_input("상세 내역")
-    inc = st.number_input("수입", min_value=0, step=1000)
-    exp = st.number_input("지출", min_value=0, step=1000)
+    inc = st.number_input("수입 금액", min_value=0, step=1000)
+    exp = st.number_input("지출 금액", min_value=0, step=1000)
     
     if st.form_submit_button("구글 시트에 저장"):
-        new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
-                                columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
-        updated_df = pd.concat([df, new_row], ignore_index=True)
-        updated_df['날짜'] = updated_df['날짜'].dt.strftime('%Y-%m-%d')
-        conn.update(spreadsheet=SHEET_URL, data=updated_df)
-        st.sidebar.success("✅ 저장 성공!")
-        st.rerun()
+        if not item:
+            st.error("상세 내역을 적어주세요!")
+        else:
+            new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
+                                    columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
+            updated_df = pd.concat([df, new_row], ignore_index=True)
+            updated_df['날짜'] = updated_df['날짜'].dt.strftime('%Y-%m-%d')
+            conn.update(spreadsheet=SHEET_URL, data=updated_df)
+            st.sidebar.success("✅ 저장 성공!")
+            st.rerun()
 
 # --- 5. 메인 화면 ---
 tab1, tab2, tab3 = st.tabs(["📊 월별 분석", "🔍 분류별 통계", "📅 연간 요약"])
@@ -110,9 +117,9 @@ with tab1:
         st.divider()
         gc1, gc2 = st.columns(2)
         with gc1:
-            st.plotly_chart(px.pie(m_df[m_df['지출']>0], values='지출', names='대분류', title="📉 지출 비중", hole=0.3), use_container_width=True)
+            st.plotly_chart(px.pie(m_df[m_df['지출']>0], values='지출', names='대분류', title="📉 지출 비중", hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
         with gc2:
-            st.plotly_chart(px.pie(m_df[m_df['수입']>0], values='수입', names='소분류', title="📈 수입 구성", hole=0.3), use_container_width=True)
+            st.plotly_chart(px.pie(m_df[m_df['수입']>0], values='수입', names='소분류', title="📈 수입 구성", hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel2), use_container_width=True)
 
         st.divider()
         st.subheader("📝 상세 내역 수정")
@@ -130,13 +137,13 @@ with tab1:
             key="month_editor"
         )
 
-        # [수정 완료] 149번 줄 괄호 닫기 및 로직 보수
         with col_t2:
             st.write("")
             if st.button("💾 수정사항 저장", use_container_width=True):
+                edited_df['날짜'] = pd.to_datetime(edited_df['날짜'])
                 other_months = df[df['연월'] != sel_m].drop(columns=['연월'])
                 final_df = pd.concat([other_months, edited_df], ignore_index=True)
-                final_df['날짜'] = pd.to_datetime(final_df['날짜']).dt.strftime('%Y-%m-%d')
+                final_df['날짜'] = final_df['날짜'].dt.strftime('%Y-%m-%d')
                 conn.update(spreadsheet=SHEET_URL, data=final_df)
                 st.success("✅ 구글 시트 업데이트 완료!")
                 st.rerun()
@@ -159,5 +166,5 @@ with tab3:
         fig = go.Figure()
         fig.add_trace(go.Bar(x=ms['월'], y=ms['수입'], name='수입', marker_color='#1f77b4'))
         fig.add_trace(go.Bar(x=ms['월'], y=ms['지출'], name='지출', marker_color='#ff7f0e'))
-        fig.update_layout(barmode='group', template="plotly_white")
+        fig.update_layout(barmode='group', template="plotly_white", xaxis_title="월별", yaxis_title="금액(원)")
         st.plotly_chart(fig, use_container_width=True)
