@@ -17,7 +17,7 @@ def load_data():
     try:
         # 데이터 로드 시 주소를 명시적으로 지정하여 경로 이탈을 방지합니다.
         df = conn.read(
-            spreadsheet="https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo",
+            spreadsheet="https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo/edit?gid=0#gid=0",
             ttl=0
         )
         
