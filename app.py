@@ -96,16 +96,14 @@ with st.sidebar.form("input_form", clear_on_submit=True):
 st.title("💰 지호 & 정희 통합 가계부")
 tab1, tab2, tab3 = st.tabs(["📊 월간 분석 & 수정", "🔍 카테고리 상세", "📅 연간 리포트"])
 
-# 표 서식 공통 설정
 col_config = {
     "날짜": st.column_config.DateColumn(format="YYYY-MM-DD"),
     "수입": st.column_config.NumberColumn(format="%,d"),
     "지출": st.column_config.NumberColumn(format="%,d")
 }
 
-# 공통 색상 테마
-PASTEL_INC = "#AEC6CF" # 파스텔 블루
-PASTEL_EXP = "#FFB347" # 파스텔 오렌지
+PASTEL_INC = "#AEC6CF" 
+PASTEL_EXP = "#FFB347" 
 
 with tab1:
     if not df.empty:
@@ -122,85 +120,4 @@ with tab1:
         st.divider()
         gc1, gc2 = st.columns(2)
         with gc1:
-            if m_df['지출'].sum() > 0:
-                st.plotly_chart(px.pie(m_df[m_df['지출']>0], values='지출', names='대분류', hole=0.3, 
-                                      title="지출 비중 (대분류)", color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
-        with gc2:
-            if m_df['수입'].sum() > 0:
-                st.plotly_chart(px.pie(m_df[m_df['수입']>0], values='수입', names='소분류', hole=0.3, 
-                                      title="수입 비중 (소분류)", color_discrete_sequence=px.colors.qualitative.Pastel), use_container_width=True)
-        
-        st.subheader(f"📝 {sel_m} 상세 내역 확인 및 수정")
-        m_df_edit = m_df.drop(columns=['연월']).copy()
-        m_df_edit['날짜'] = m_df_edit['날짜'].dt.date
-
-        edited_df = st.data_editor(m_df_edit, use_container_width=True, num_rows="dynamic", column_config=col_config, hide_index=True)
-        
-        if st.button("💾 변경사항 시트에 반영"):
-            df_all = df.copy()
-            df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
-            other_data = df_all[df_all['날짜'].str.slice(0, 7) != sel_m]
-            edited_df_save = edited_df.copy()
-            edited_df_save['날짜'] = pd.to_datetime(edited_df_save['날짜']).dt.strftime('%Y-%m-%d')
-            final_df = pd.concat([other_data, edited_df_save], ignore_index=True)
-            try:
-                conn.update(spreadsheet=SHEET_URL, data=final_df)
-                st.success("✅ 시트에 반영되었습니다!")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ 수정 실패: {e}")
-
-with tab2:
-    if not df.empty:
-        st.subheader(f"🔍 {sel_m} 카테고리별 정밀 분석")
-        exp_only = m_df[m_df['지출'] > 0].copy()
-        if not exp_only.empty:
-            m_sum = exp_only.groupby('대분류')['지출'].sum().sort_values(ascending=False).reset_index()
-            sc1, sc2 = st.columns([1, 2])
-            with sc1:
-                st.write("**항목별 지출 합계**")
-                st.dataframe(m_sum, column_config={"지출": st.column_config.NumberColumn(format="%,d")}, hide_index=True, use_container_width=True)
-            with sc2:
-                selected_cat = st.selectbox("상세 정보를 볼 대분류를 선택하세요", m_sum['대분류'].unique())
-                drill_df = exp_only[exp_only['대분류'] == selected_cat]
-                fig = px.pie(drill_df, values='지출', names='소분류', title=f"'{selected_cat}' 소분류 비중", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("이달 지출 내역이 없습니다.")
-
-with tab3:
-    if not df.empty:
-        # 연간 누적 데이터 계산
-        total_inc = df['수입'].sum()
-        total_exp = df['지출'].sum()
-        total_bal = total_inc - total_exp
-        
-        st.subheader("📊 2026년 전체 누적 현황")
-        ac1, ac2, ac3 = st.columns(3)
-        ac1.metric("연간 총 수입", f"{total_inc:,}원")
-        ac2.metric("연간 총 지출", f"{total_exp:,}원")
-        ac3.metric("누적 잔액", f"{total_bal:,}원")
-        
-        st.divider()
-        
-        # 연간 월별 추이 (파스텔 톤 적용)
-        st.subheader("📅 월별 수입 vs 지출 추이")
-        df['월'] = df['날짜'].dt.strftime('%m월')
-        year_sum = df.groupby('월')[['수입', '지출']].sum().reindex([f"{i:02d}월" for i in range(1, 13)]).fillna(0).reset_index()
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['수입'], name='수입', marker_color=PASTEL_INC))
-        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['지출'], name='지출', marker_color=PASTEL_EXP))
-        fig.update_layout(barmode='group', template="plotly_white", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.divider()
-        
-        # 연간 카테고리 누적 (파스텔 톤 적용)
-        st.subheader("📈 연간 카테고리별 누적 지출")
-        cat_trend = df[df['지출'] > 0].groupby(['월', '대분류'])['지출'].sum().reset_index()
-        fig2 = px.bar(cat_trend, x='월', y='지출', color='대분류', title="월별 지출 구성", text_auto='.2s',
-                     color_discrete_sequence=px.colors.qualitative.Pastel)
-        fig2.update_layout(template="plotly_white", barmode='stack')
-        st.plotly_chart(fig2, use_container_width=True)
+            if m_df['지출'].sum() > 0
