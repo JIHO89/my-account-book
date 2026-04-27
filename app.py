@@ -120,4 +120,4 @@ with tab1:
         st.divider()
         gc1, gc2 = st.columns(2)
         with gc1:
-            if m_df['지출'].sum() > 0
+            if m_df['지출'].sum() > 0:
