@@ -108,16 +108,4 @@ PASTEL_EXP = "#FFB347"
 with tab1:
     if not df.empty:
         df['연월'] = df['날짜'].dt.strftime('%Y-%m')
-        all_months = sorted(df['연월'].unique(), reverse=True)
-        sel_m = st.selectbox("📅 월 선택", all_months)
-        m_df = df[df['연월'] == sel_m].copy()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("월 수입", f"{m_df['수입'].sum():,}원")
-        c2.metric("월 지출", f"{m_df['지출'].sum():,}원")
-        c3.metric("잔액", f"{m_df['수입'].sum() - m_df['지출'].sum():,}원")
-        
-        st.divider()
-        gc1, gc2 = st.columns(2)
-        with gc1:
-            if m_df['지출'].sum() > 0:
+        all_months = sorted(df['
