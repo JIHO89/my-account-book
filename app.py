@@ -1,12 +1,11 @@
 import streamlit as st
 import pandas as pd
 import os
-import json
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 
-# 1. 페이지 설정 (최상단 고정)
+# 1. 페이지 설정 (최상단)
 st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 
 # 파일 경로
@@ -33,11 +32,12 @@ def check_password():
     else:
         return True
 
-# --- 3. 메인 로직 ---
+# --- 3. 메인 로직 시작 ---
 if check_password():
     def load_data():
         if os.path.exists(data_file):
             df = pd.read_csv(data_file)
+            # 중복 컬럼 제거 및 전처리
             df = df.loc[:, ~df.columns.duplicated()]
             df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce').dt.strftime('%Y-%m-%d')
             df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
@@ -50,7 +50,7 @@ if check_password():
         "users": ["지호", "정희"],
         "categories": {
             "식비": ["외식", "배달", "식재료", "간식/커피", "점심"],
-            "주거/생활": ["관리비", "공과금", "월세/대출이자", "보험료"],
+            "주거/생활": ["관리비", "공과금", "월세/대출이자", "가구/가전"],
             "교통/차량": ["주유", "통행료", "대중교통", "차량유지비"],
             "투자/수입": ["월급", "실현손익", "배당금", "기타수입"],
             "교육/육아": ["학원비", "장난감/의류", "도서", "아이용품"],
@@ -64,7 +64,7 @@ if check_password():
     df = load_data()
     st.title(f"💰 {config['app_title']} 💰")
 
-    # [사이드바 입력]
+    # [사이드바 입력창]
     st.sidebar.header("➕ 신규 입력")
     d_in = st.sidebar.date_input("날짜", datetime.now())
     u_in = st.sidebar.selectbox("결제자", config["users"])
@@ -83,21 +83,24 @@ if check_password():
             df.to_csv(data_file, index=False)
             st.rerun()
 
+    # [메인 탭 - 모든 기능 통합]
     tab_ana, tab_cat, tab_year = st.tabs(["📊 월별 분석", "🔍 분류별 통계", "📅 연간 요약"])
 
-    # 1. 월별 분석 (NameError 해결 지점)
+    # --- 1. 월별 분석 탭 ---
     with tab_ana:
         if not df.empty:
             df_a = df.copy()
             df_a['연월'] = df_a['날짜'].str[:7]
-            sel_m = st.selectbox("📅 조회 월 선택", sorted(df_a['연월'].unique(), reverse=True), key="main_sel")
+            # 선택창 생성
+            all_months = sorted(df_a['연월'].unique(), reverse=True)
+            sel_m = st.selectbox("📅 조회 월 선택", all_months, key="main_sel")
+            
+            # 필터링 데이터
             m_df = df_a[df_a['연월'] == sel_m].copy()
             
+            # 요약 지표
             t_inc, t_exp = m_df['수입'].sum(), m_df['지출'].sum()
             c1, c2, c3 = st.columns(3)
             c1.metric("월 총 수입", f"{t_inc:,}원")
             c2.metric("월 총 지출", f"{t_exp:,}원")
-            c3.metric("이번 달 잔액", f"{t_inc - t_exp:,}원")
-            
-            st.divider()
-            col1, col2 = st.columns(2)
+            c3.metric("이번 달 잔액", f"{t_inc - t_exp
