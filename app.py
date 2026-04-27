@@ -48,7 +48,7 @@ if check_password():
         "app_title": "지호 & 정희 통합 가계부",
         "users": ["지호", "정희"],
         "categories": {
-            "식비": ["외식", "배달", "식재료", "간식/커피", "점심"],
+            "식비": ["외식", "배달", "식재료", "간식/커미", "점심"],
             "주거/생활": ["관리비", "공과금", "월세/대출이자", "가구/가전"],
             "교통/차량": ["주유", "통행료", "대중교통", "차량유지비"],
             "투자/수입": ["월급", "실현손익", "배당금", "기타수입"],
@@ -75,7 +75,6 @@ if check_password():
         inc = st.number_input("수입", min_value=0, step=1000)
         exp = st.number_input("지출", min_value=0, step=1000)
         if st.form_submit_button("저장하기"):
-            # [수정 완료] 78번 줄 따옴표 누락 보수
             formatted_date = d_in.strftime('%Y-%m-%d')
             new_row = pd.DataFrame([[formatted_date, u_in, m_in, s_in, item, int(inc), int(exp)]], 
                                    columns=['날짜', '결제자', '대분류', '소분류', '항목', '수입', '지출'])
@@ -110,4 +109,57 @@ if check_password():
                 st.write("### 💰 수입 구성 (소분류)")
                 inc_df = m_df[m_df['수입'] > 0].groupby('소분류')['수입'].sum().reset_index()
                 if not inc_df.empty:
-                    st.plotly_chart(px.pie(inc_df, values='수입', names='소분류', hole=0.3, color_discrete_sequence=px.colors.qualitative
+                    # [수정 완료] 113번 줄 괄호 미완성 부분 보수
+                    st.plotly_chart(px.pie(inc_df, values='수입', names='소분류', hole=0.3, color_discrete_sequence=px.colors.qualitative.Pastel2), use_container_width=True)
+
+            st.subheader("📝 상세 장부 수정")
+            edited_df = st.data_editor(
+                m_df.drop(columns=['연월']).sort_values('날짜', ascending=False),
+                use_container_width=True,
+                num_rows="dynamic",
+                column_config={
+                    "수입": st.column_config.NumberColumn("수입", format="%,d"),
+                    "지출": st.column_config.NumberColumn("지출", format="%,d")
+                }
+            )
+            if st.button("💾 변경사항 저장"):
+                other_months = df_a[df_a['연월'] != sel_m]
+                final_df = pd.concat([other_months, edited_df], ignore_index=True)
+                final_df = final_df.drop(columns=['연월']).sort_values(by='날짜', ascending=False).reset_index(drop=True)
+                final_df.to_csv(data_file, index=False)
+                st.success("저장 완료!")
+                st.rerun()
+
+    # 2. 분류별 통계 탭
+    with tab_cat:
+        st.subheader("🔍 대분류별 소분류 상세")
+        if not df.empty:
+            df_c = df.copy()
+            df_c['연월'] = df_c['날짜'].str[:7]
+            sel_m_c = st.selectbox("조회할 달 선택", sorted(df_c['연월'].unique(), reverse=True), key="cat_sel")
+            c_df = df_c[(df_c['연월'] == sel_m_c) & (df_c['지출'] > 0)]
+            if not c_df.empty:
+                cat_rank = c_df.groupby("대분류")["지출"].sum().sort_values(ascending=False).reset_index()
+                for _, row in cat_rank.iterrows():
+                    with st.expander(f"📁 {row['대분류']} : {row['지출']:,}원"):
+                        sub_df = c_df[c_df['대분류'] == row['대분류']].groupby("소분류")["지출"].sum().reset_index()
+                        c_map = {name: color for name, color in zip(sub_df['소분류'], px.colors.qualitative.Pastel)}
+                        sc1, sc2 = st.columns(2)
+                        with sc1: st.plotly_chart(px.pie(sub_df, values="지출", names="소분류", hole=0.3, color="소분류", color_discrete_map=c_map), use_container_width=True)
+                        with sc2:
+                            fig_b = px.bar(sub_df, x="소분류", y="지출", text_auto=',.0f', color="소분류", color_discrete_map=c_map)
+                            fig_b.update_layout(showlegend=False)
+                            st.plotly_chart(fig_b, use_container_width=True)
+
+    # 3. 연간 요약 탭
+    with tab_year:
+        st.subheader("📅 연간 수입/지출 추이")
+        if not df.empty:
+            df_y = df.copy()
+            df_y['월'] = pd.to_datetime(df_y['날짜']).dt.month
+            y_sum = df_y.groupby('월')[['수입', '지출']].sum().reindex(range(1, 13)).fillna(0).reset_index()
+            fig_y = go.Figure()
+            fig_y.add_trace(go.Bar(x=y_sum['월'], y=y_sum['수입'], name='수입', marker_color='#A3C4F3'))
+            fig_y.add_trace(go.Bar(x=y_sum['월'], y=y_sum['지출'], name='지출', marker_color='#FFCFD2'))
+            fig_y.update_layout(xaxis=dict(tickmode='linear', title="월"), barmode='group')
+            st.plotly_chart(fig_y, use_container_width=True)
