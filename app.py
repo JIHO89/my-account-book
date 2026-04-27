@@ -9,27 +9,17 @@ from datetime import datetime
 st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 
 # --- 2. 구글 시트 연결 설정 ---
-# 불필요한 뒷부분을 제거한 순수 시트 주소입니다.
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo"
-
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=0)
 def load_data():
     try:
-        # 명시적으로 SHEET_URL을 사용하여 데이터 로드
-        df = conn.read(
-            spreadsheet=SHEET_URL,
-            ttl=0
-        )
-        
-        # 컬럼명 공백 제거
+        df = conn.read(spreadsheet=SHEET_URL, ttl=0)
         df.columns = [str(c).strip() for c in df.columns]
-        
         if df.empty:
             return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
         
-        # 데이터 타입 정제
         df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
         df = df.dropna(subset=['날짜'])
         df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
@@ -38,10 +28,8 @@ def load_data():
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
     except Exception as e:
         st.error(f"⚠️ 데이터 로드 오류: {e}")
-        st.info("💡 Secrets의 'token_uri'에 apis가 포함되었는지, 시트 주소가 정확한지 확인해 보세요.")
         return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
 
-# 데이터 초기 로드
 df = load_data()
 
 # --- 3. 로그인 보안 ---
@@ -59,7 +47,6 @@ if not st.session_state["password_correct"]:
             st.error("❌ 비밀번호가 틀렸습니다.")
     st.stop()
 
-# 카테고리 구성
 config = {
     "users": ["지호", "정희"],
     "categories": {
@@ -93,7 +80,6 @@ with st.sidebar.form("input_form", clear_on_submit=True):
         else:
             new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
                                     columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
-            
             df_all = df.copy()
             df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
             updated_df = pd.concat([df_all, new_row], ignore_index=True)
@@ -104,60 +90,4 @@ with st.sidebar.form("input_form", clear_on_submit=True):
                 st.cache_data.clear() 
                 st.rerun()
             except Exception as e:
-                st.sidebar.error(f"❌ 저장 실패: {e}")
-
-# --- 5. 메인 대시보드 ---
-st.title("💰 지호 & 정희 통합 가계부")
-tab1, tab2, tab3 = st.tabs(["📊 분석", "🔍 수정", "📅 리포트"])
-
-with tab1:
-    if not df.empty:
-        df['연월'] = df['날짜'].dt.strftime('%Y-%m')
-        sel_m = st.selectbox("월 선택", sorted(df['연월'].unique(), reverse=True))
-        m_df = df[df['연월'] == sel_m].copy()
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("월 수입", f"{m_df['수입'].sum():,}원")
-        c2.metric("월 지출", f"{m_df['지출'].sum():,}원")
-        c3.metric("잔액", f"{m_df['수입'].sum() - m_df['지출'].sum():,}원")
-        
-        st.divider()
-        gc1, gc2 = st.columns(2)
-        with gc1:
-            st.plotly_chart(px.pie(m_df[m_df['지출']>0], values='지출', names='대분류', hole=0.3, title="지출 비중"), use_container_width=True)
-        with gc2:
-            st.plotly_chart(px.pie(m_df[m_df['수입']>0], values='수입', names='소분류', hole=0.3, title="수입 비중"), use_container_width=True)
-
-with tab2:
-    if not df.empty:
-        st.subheader(f"📝 {sel_m} 상세 관리")
-        m_df_edit = m_df.drop(columns=['연월']).copy()
-        m_df_edit['날짜'] = m_df_edit['날짜'].dt.strftime('%Y-%m-%d')
-        
-        edited_df = st.data_editor(m_df_edit, use_container_width=True, num_rows="dynamic")
-        
-        if st.button("💾 시트에 반영"):
-            df_all = df.copy()
-            df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
-            other_data = df_all[df_all['날짜'].str.slice(0, 7) != sel_m]
-            final_df = pd.concat([other_data, edited_df], ignore_index=True)
-            
-            try:
-                conn.update(spreadsheet=SHEET_URL, data=final_df)
-                st.success("✅ 업데이트 완료!")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ 수정 실패: {e}")
-
-with tab3:
-    if not df.empty:
-        st.subheader("📅 연간 추이")
-        df['월'] = df['날짜'].dt.strftime('%m월')
-        year_sum = df.groupby('월')[['수입', '지출']].sum().reindex([f"{i:02d}월" for i in range(1, 13)]).fillna(0).reset_index()
-        
-        fig = go.Figure()
-        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['수입'], name='수입', marker_color='#1f77b4'))
-        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['지출'], name='지출', marker_color='#ff7f0e'))
-        fig.update_layout(barmode='group', template="plotly_white")
-        st.plotly_chart(fig, use_container_width=True)
+                st.sidebar.error(f"
