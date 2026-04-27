@@ -6,7 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 
-# 1. 페이지 설정
+# 1. 페이지 설정 (최상단 고정)
 st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 
 # 파일 경로
@@ -33,7 +33,7 @@ def check_password():
     else:
         return True
 
-# --- 3. 메인 로직 시작 ---
+# --- 3. 메인 로직 ---
 if check_password():
     def load_data():
         if os.path.exists(data_file):
@@ -85,72 +85,19 @@ if check_password():
 
     tab_ana, tab_cat, tab_year = st.tabs(["📊 월별 분석", "🔍 분류별 통계", "📅 연간 요약"])
 
-# 1. 월별 분석 탭 내의 수정 부분
+    # 1. 월별 분석 (NameError 해결 지점)
     with tab_ana:
         if not df.empty:
-            # ... (중략) ...
-
-            st.subheader("📝 상세 장부 수정")
-            # [수정 포인트] column_config의 format을 %d에서 %,d로 변경
-            edited_df = st.data_editor(
-                m_df.drop(columns=['연월']).sort_values('날짜', ascending=False),
-                use_container_width=True,
-                num_rows="dynamic",
-                column_config={
-                    "수입": st.column_config.NumberColumn(
-                        "수입",
-                        help="수입 금액을 입력하세요",
-                        format="%,d 원"  # 이 부분이 콤마와 단위를 자동으로 붙여줍니다
-                    ),
-                    "지출": st.column_config.NumberColumn(
-                        "지출",
-                        help="지출 금액을 입력하세요",
-                        format="%,d 원"  # 이 부분이 콤마와 단위를 자동으로 붙여줍니다
-                    )
-                }
-            )
+            df_a = df.copy()
+            df_a['연월'] = df_a['날짜'].str[:7]
+            sel_m = st.selectbox("📅 조회 월 선택", sorted(df_a['연월'].unique(), reverse=True), key="main_sel")
+            m_df = df_a[df_a['연월'] == sel_m].copy()
             
-            if st.button("💾 변경사항 저장"):
-                # 저장 로직 (기존과 동일)
-                other_months = df_a[df_a['연월'] != sel_m]
-                final_df = pd.concat([other_months, edited_df], ignore_index=True)
-                final_df = final_df.drop(columns=['연월']).sort_values(by='날짜', ascending=False).reset_index(drop=True)
-                final_df.to_csv(data_file, index=False)
-                st.success("콤마가 적용된 데이터가 저장되었습니다!")
-                st.rerun()
-
-    # 2. 분류별 통계 (색상 통일 적용)
-    with tab_cat:
-        st.subheader("🔍 대분류별 소분류 상세")
-        if not df.empty:
-            df_c = df.copy()
-            df_c['연월'] = df_c['날짜'].str[:7]
-            sel_m_c = st.selectbox("조회 월 선택", sorted(df_c['연월'].unique(), reverse=True), key="cat_sel")
-            c_df = df_c[(df_c['연월'] == sel_m_c) & (df_c['지출'] > 0)]
-            if not c_df.empty:
-                cat_rank = c_df.groupby("대분류")["지출"].sum().sort_values(ascending=False).reset_index()
-                for _, row in cat_rank.iterrows():
-                    with st.expander(f"📁 {row['대분류']} : {row['지출']:,}원"):
-                        sub_df = c_df[c_df['대분류'] == row['대분류']].groupby("소분류")["지출"].sum().reset_index()
-                        # 색상 매핑으로 원형/막대 색상 통일
-                        c_map = {name: color for name, color in zip(sub_df['소분류'], px.colors.qualitative.Pastel)}
-                        sc1, sc2 = st.columns(2)
-                        with sc1:
-                            st.plotly_chart(px.pie(sub_df, values="지출", names="소분류", hole=0.3, color="소분류", color_discrete_map=c_map), use_container_width=True)
-                        with sc2:
-                            fig_b = px.bar(sub_df, x="소분류", y="지출", text_auto=',.0f', color="소분류", color_discrete_map=c_map)
-                            fig_b.update_layout(showlegend=False)
-                            st.plotly_chart(fig_b, use_container_width=True)
-
-    # 3. 연간 요약
-    with tab_year:
-        st.subheader("📅 연간 수입/지출 추이")
-        if not df.empty:
-            df_y = df.copy()
-            df_y['월'] = pd.to_datetime(df_y['날짜']).dt.month
-            y_sum = df_y.groupby('월')[['수입', '지출']].sum().reindex(range(1, 13)).fillna(0).reset_index()
-            fig_y = go.Figure()
-            fig_y.add_trace(go.Bar(x=y_sum['월'], y=y_sum['수입'], name='수입', marker_color='#A3C4F3'))
-            fig_y.add_trace(go.Bar(x=y_sum['월'], y=y_sum['지출'], name='지출', marker_color='#FFCFD2'))
-            fig_y.update_layout(xaxis=dict(tickmode='linear', title="월"), barmode='group')
-            st.plotly_chart(fig_y, use_container_width=True)
+            t_inc, t_exp = m_df['수입'].sum(), m_df['지출'].sum()
+            c1, c2, c3 = st.columns(3)
+            c1.metric("월 총 수입", f"{t_inc:,}원")
+            c2.metric("월 총 지출", f"{t_exp:,}원")
+            c3.metric("이번 달 잔액", f"{t_inc - t_exp:,}원")
+            
+            st.divider()
+            col1, col2 = st.columns(2)
