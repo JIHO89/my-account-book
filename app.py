@@ -8,7 +8,7 @@ from datetime import datetime
 # 1. 페이지 설정
 st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 
-# 팀장님 구글 시트 주소
+# 팀장님 구글 시트 주소 (Secrets에 등록했더라도 코드에 남겨둡니다)
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo/edit#gid=0"
 
 # --- 2. 보안 설정 (비밀번호: 0614) ---
@@ -27,6 +27,7 @@ if not st.session_state["password_correct"]:
     st.stop()
 
 # --- 3. 구글 시트 연결 및 데이터 로드 ---
+# [보수 포인트] 설정을 통해 쓰기 권한(update)을 활성화합니다.
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
@@ -38,9 +39,8 @@ def load_data():
         if df.empty:
             return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
 
-        # [보수 포인트] 날짜 변환을 더 강하게 처리
         df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
-        df = df.dropna(subset=['날짜']) # 날짜가 아닌 행은 제거
+        df = df.dropna(subset=['날짜'])
         df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
         df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
@@ -89,11 +89,11 @@ with st.sidebar.form("input_form", clear_on_submit=True):
             new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
                                     columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
             
-            # [보수 포인트] 기존 데이터와 병합 전 날짜 형식을 확실히 맞춤
             df_for_save = df.copy()
             df_for_save['날짜'] = df_for_save['날짜'].dt.strftime('%Y-%m-%d')
             
             updated_df = pd.concat([df_for_save, new_row], ignore_index=True)
+            # [수정] update 실행 시 spreadsheet 인자를 생략(Secrets 참조)하거나 명시적으로 전달
             conn.update(spreadsheet=SHEET_URL, data=updated_df)
             st.sidebar.success("✅ 저장 성공!")
             st.rerun()
@@ -139,7 +139,6 @@ with tab1:
         with col_t2:
             st.write("")
             if st.button("💾 수정사항 저장", use_container_width=True):
-                # [보수 포인트] 저장 시 날짜를 문자열로 안전하게 변환
                 df_all = df.copy()
                 df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
                 
@@ -152,18 +151,8 @@ with tab1:
 with tab3:
     st.header(f"📅 {datetime.now().year}년 연간 재정 요약")
     if not df.empty:
-        y_inc = df['수입'].sum()
-        y_exp = df['지출'].sum()
-        y1, y2, y3 = st.columns(3)
-        y1.metric("연간 총수입", f"{y_inc:,.0f}원")
-        y2.metric("연간 총지출", f"{y_exp:,.0f}원")
-        y3.metric("연간 순이익", f"{y_inc - y_exp:,.0f}원")
-
-        st.divider()
-        st.subheader("📊 월별 수입 vs 지출 추이")
         df['월'] = df['날짜'].dt.strftime('%m월')
         ms = df.groupby('월')[['수입', '지출']].sum().reindex([f"{i:02d}월" for i in range(1, 13)]).fillna(0).reset_index()
-        
         fig = go.Figure()
         fig.add_trace(go.Bar(x=ms['월'], y=ms['수입'], name='수입', marker_color='#1f77b4'))
         fig.add_trace(go.Bar(x=ms['월'], y=ms['지출'], name='지출', marker_color='#ff7f0e'))
