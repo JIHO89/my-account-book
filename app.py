@@ -93,7 +93,7 @@ with st.sidebar.form("input_form", clear_on_submit=True):
             df_for_save['날짜'] = df_for_save['날짜'].dt.strftime('%Y-%m-%d')
             
             updated_df = pd.concat([df_for_save, new_row], ignore_index=True)
-            # [수정] update 실행 시 spreadsheet 인자를 생략(Secrets 참조)하거나 명시적으로 전달
+            # [수정] update 실행
             conn.update(spreadsheet=SHEET_URL, data=updated_df)
             st.sidebar.success("✅ 저장 성공!")
             st.rerun()
