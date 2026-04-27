@@ -31,28 +31,25 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
     try:
-        # 실시간 데이터를 읽어옵니다 (ttl=0)
+        # 실시간 데이터를 읽어옵니다.
         df = conn.read(spreadsheet=SHEET_URL, ttl=0)
-        
-        # 컬럼명 공백 제거 및 문자열 변환
         df.columns = [str(c).strip() for c in df.columns]
         
         if df.empty:
             return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
 
-        # 데이터 정제
+        # [보수 포인트] 날짜 변환을 더 강하게 처리
         df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
-        df = df.dropna(subset=['날짜'])
+        df = df.dropna(subset=['날짜']) # 날짜가 아닌 행은 제거
         df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
         df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
     except Exception as e:
-        st.error(f"⚠️ 시트 읽기 오류 (공유 설정을 '편집자'로 확인해주세요): {e}")
+        st.error(f"⚠️ 시트 읽기 오류: {e}")
         return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
 
 df = load_data()
 
-# 가계부 카테고리 설계 (투자/수입 항목 명확화)
 config = {
     "users": ["지호", "정희"],
     "categories": {
@@ -73,10 +70,8 @@ col_t1, col_t2 = st.columns([4, 1])
 with col_t1:
     st.title("💰 지호 & 정희 구글 통합 가계부 💰")
 
-# --- 4. 사이드바 입력창 (동적 카테고리 반영) ---
+# --- 4. 사이드바 입력창 ---
 st.sidebar.header("➕ 신규 내역 입력")
-
-# 대분류 선택을 form 밖으로 빼서 소분류가 즉시 바뀌도록 함
 u_in = st.sidebar.selectbox("결제자", config["users"])
 m_in = st.sidebar.selectbox("대분류", list(config["categories"].keys()))
 s_in = st.sidebar.selectbox("소분류", config["categories"][m_in])
@@ -93,8 +88,12 @@ with st.sidebar.form("input_form", clear_on_submit=True):
         else:
             new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
                                     columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
-            updated_df = pd.concat([df, new_row], ignore_index=True)
-            updated_df['날짜'] = updated_df['날짜'].dt.strftime('%Y-%m-%d')
+            
+            # [보수 포인트] 기존 데이터와 병합 전 날짜 형식을 확실히 맞춤
+            df_for_save = df.copy()
+            df_for_save['날짜'] = df_for_save['날짜'].dt.strftime('%Y-%m-%d')
+            
+            updated_df = pd.concat([df_for_save, new_row], ignore_index=True)
             conn.update(spreadsheet=SHEET_URL, data=updated_df)
             st.sidebar.success("✅ 저장 성공!")
             st.rerun()
@@ -140,10 +139,12 @@ with tab1:
         with col_t2:
             st.write("")
             if st.button("💾 수정사항 저장", use_container_width=True):
-                edited_df['날짜'] = pd.to_datetime(edited_df['날짜'])
-                other_months = df[df['연월'] != sel_m].drop(columns=['연월'])
+                # [보수 포인트] 저장 시 날짜를 문자열로 안전하게 변환
+                df_all = df.copy()
+                df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
+                
+                other_months = df_all[df_all['날짜'].str.slice(0, 7) != sel_m]
                 final_df = pd.concat([other_months, edited_df], ignore_index=True)
-                final_df['날짜'] = final_df['날짜'].dt.strftime('%Y-%m-%d')
                 conn.update(spreadsheet=SHEET_URL, data=final_df)
                 st.success("✅ 구글 시트 업데이트 완료!")
                 st.rerun()
@@ -151,12 +152,12 @@ with tab1:
 with tab3:
     st.header(f"📅 {datetime.now().year}년 연간 재정 요약")
     if not df.empty:
-        total_inc = df['수입'].sum()
-        total_exp = df['지출'].sum()
+        y_inc = df['수입'].sum()
+        y_exp = df['지출'].sum()
         y1, y2, y3 = st.columns(3)
-        y1.metric("연간 총수입", f"{total_inc:,.0f}원")
-        y2.metric("연간 총지출", f"{total_exp:,.0f}원")
-        y3.metric("연간 순이익", f"{total_inc - total_exp:,.0f}원")
+        y1.metric("연간 총수입", f"{y_inc:,.0f}원")
+        y2.metric("연간 총지출", f"{y_exp:,.0f}원")
+        y3.metric("연간 순이익", f"{y_inc - y_exp:,.0f}원")
 
         st.divider()
         st.subheader("📊 월별 수입 vs 지출 추이")
@@ -166,5 +167,5 @@ with tab3:
         fig = go.Figure()
         fig.add_trace(go.Bar(x=ms['월'], y=ms['수입'], name='수입', marker_color='#1f77b4'))
         fig.add_trace(go.Bar(x=ms['월'], y=ms['지출'], name='지출', marker_color='#ff7f0e'))
-        fig.update_layout(barmode='group', template="plotly_white", xaxis_title="월별", yaxis_title="금액(원)")
+        fig.update_layout(barmode='group', template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
