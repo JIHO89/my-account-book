@@ -11,7 +11,7 @@ st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 # 파일 경로
 data_file = "my_account_book.csv"
 
-# --- 2. 보안 설정 ---
+# --- 2. 보안 설정 (비밀번호: 0614) ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == "0614":
@@ -78,4 +78,17 @@ if check_password():
             formatted_date = d_in.strftime('%Y-%m-%d')
             new_row = pd.DataFrame([[formatted_date, u_in, m_in, s_in, item, int(inc), int(exp)]], 
                                    columns=['날짜', '결제자', '대분류', '소분류', '항목', '수입', '지출'])
-            df = pd.concat([df, new_row],
+            # [수정 완료] 81번 줄 괄호 닫기 보수
+            df = pd.concat([df, new_row], ignore_index=True)
+            df.to_csv(data_file, index=False, encoding='utf-8-sig')
+            st.rerun()
+
+    tab_ana, tab_cat, tab_year = st.tabs(["📊 월별 분석", "🔍 분류별 통계", "📅 연간 요약"])
+
+    # 1. 월별 분석 탭
+    with tab_ana:
+        if not df.empty:
+            df_a = df.copy()
+            df_a['연월'] = df_a['날짜'].str[:7]
+            sel_m = st.selectbox("📅 조회 월 선택", sorted(df_a['연월'].unique(), reverse=True), key="main_sel")
+            m_df = df_a[df_a['연월
