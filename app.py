@@ -82,34 +82,40 @@ with st.sidebar.form("input_form", clear_on_submit=True):
         else:
             new_row = pd.DataFrame([[d_in.strftime('%Y-%m-%d'), m_in, s_in, item, int(inc), int(exp), u_in]], 
                                     columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
-            
             df_all = df.copy()
             df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
             updated_df = pd.concat([df_all, new_row], ignore_index=True)
-            
             try:
                 conn.update(spreadsheet=SHEET_URL, data=updated_df)
                 st.sidebar.success("✅ 저장 성공!")
                 st.cache_data.clear() 
                 st.rerun()
             except Exception as e:
-                # 여기서 문법 에러가 나지 않도록 따옴표를 정확히 닫았습니다.
                 st.sidebar.error(f"❌ 저장 실패: {e}")
 
 # --- 5. 메인 대시보드 ---
 st.title("💰 지호 & 정희 통합 가계부")
-tab1, tab2, tab3 = st.tabs(["📊 월간 분석", "🔍 내역 수정", "📅 연간 리포트"])
+tab1, tab2, tab3 = st.tabs(["📊 월간 분석 & 수정", "🔍 카테고리 상세", "📅 연간 리포트"])
+
+# 표 서식 공통 설정 (날짜 시간 삭제, 콤마 표시)
+col_config = {
+    "날짜": st.column_config.DateColumn(format="YYYY-MM-DD"),
+    "수입": st.column_config.NumberColumn(format="%,d"),
+    "지출": st.column_config.NumberColumn(format="%,d")
+}
 
 with tab1:
     if not df.empty:
         df['연월'] = df['날짜'].dt.strftime('%Y-%m')
-        sel_m = st.selectbox("📅 조회할 월을 선택하세요", sorted(df['연월'].unique(), reverse=True))
+        all_months = sorted(df['연월'].unique(), reverse=True)
+        sel_m = st.selectbox("📅 월 선택", all_months)
         m_df = df[df['연월'] == sel_m].copy()
         
+        # 지표 표시
         c1, c2, c3 = st.columns(3)
-        c1.metric("월 총 수입", f"{m_df['수입'].sum():,}원")
-        c2.metric("월 총 지출", f"{m_df['지출'].sum():,}원")
-        c3.metric("이달의 잔액", f"{m_df['수입'].sum() - m_df['지출'].sum():,}원")
+        c1.metric("월 수입", f"{m_df['수입'].sum():,}원")
+        c2.metric("월 지출", f"{m_df['지출'].sum():,}원")
+        c3.metric("잔액", f"{m_df['수입'].sum() - m_df['지출'].sum():,}원")
         
         st.divider()
         gc1, gc2 = st.columns(2)
@@ -120,53 +126,89 @@ with tab1:
             if m_df['수입'].sum() > 0:
                 st.plotly_chart(px.pie(m_df[m_df['수입']>0], values='수입', names='소분류', hole=0.3, title="수입 비중 (소분류)"), use_container_width=True)
         
-        # 월간 분석 하단에 상세 표 노출
-        st.subheader(f"📄 {sel_m} 상세 내역")
-        st.dataframe(m_df.drop(columns=['연월']), use_container_width=True, hide_index=True)
-
-with tab2:
-    if not df.empty:
-        st.subheader(f"📝 {sel_m} 데이터 수정 및 삭제")
-        st.info("아래 표를 직접 클릭하여 수정하거나, 행을 선택해 삭제할 수 있습니다.")
+        # 내역 수정 기능 통합
+        st.subheader(f"📝 {sel_m} 상세 내역 확인 및 수정")
+        st.caption("표 안의 내용을 클릭해 수정하거나, 행을 선택해 삭제할 수 있습니다.")
         m_df_edit = m_df.drop(columns=['연월']).copy()
-        m_df_edit['날짜'] = m_df_edit['날짜'].dt.strftime('%Y-%m-%d')
+        m_df_edit['날짜'] = m_df_edit['날짜'].dt.date # 시간 삭제
+
+        edited_df = st.data_editor(
+            m_df_edit, 
+            use_container_width=True, 
+            num_rows="dynamic",
+            column_config=col_config,
+            hide_index=True
+        )
         
-        edited_df = st.data_editor(m_df_edit, use_container_width=True, num_rows="dynamic")
-        
-        if st.button("💾 시트에 반영 (수정/삭제 완료)"):
+        if st.button("💾 변경사항 시트에 반영"):
             df_all = df.copy()
             df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
             other_data = df_all[df_all['날짜'].str.slice(0, 7) != sel_m]
-            final_df = pd.concat([other_data, edited_df], ignore_index=True)
             
+            # 수정된 데이터 날짜 포맷 복구
+            edited_df_save = edited_df.copy()
+            edited_df_save['날짜'] = pd.to_datetime(edited_df_save['날짜']).dt.strftime('%Y-%m-%d')
+            
+            final_df = pd.concat([other_data, edited_df_save], ignore_index=True)
             try:
                 conn.update(spreadsheet=SHEET_URL, data=final_df)
-                st.success("✅ 시트가 업데이트되었습니다!")
+                st.success("✅ 시트에 성공적으로 반영되었습니다!")
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
                 st.error(f"❌ 수정 실패: {e}")
 
+with tab2:
+    if not df.empty:
+        st.subheader(f"🔍 {sel_m} 카테고리별 정밀 분석")
+        
+        # 1. 대분류별 지출 요약
+        exp_only = m_df[m_df['지출'] > 0].copy()
+        if not exp_only.empty:
+            m_sum = exp_only.groupby('대분류')['지출'].sum().sort_values(ascending=False).reset_index()
+            
+            sc1, sc2 = st.columns([1, 2])
+            with sc1:
+                st.write("**항목별 지출 합계**")
+                st.dataframe(
+                    m_sum, 
+                    column_config={"지출": st.column_config.NumberColumn(format="%,d")},
+                    hide_index=True,
+                    use_container_width=True
+                )
+            
+            with sc2:
+                # 2. 대분류 클릭/선택 시 소분류 드릴다운
+                selected_cat = st.selectbox("상세 정보를 볼 대분류를 선택하세요", m_sum['대분류'].unique())
+                drill_df = exp_only[exp_only['대분류'] == selected_cat]
+                
+                fig = px.pie(
+                    drill_df, 
+                    values='지출', 
+                    names='소분류', 
+                    title=f"'{selected_cat}' 항목의 소분류 비중",
+                    hole=0.4,
+                    color_discrete_sequence=px.colors.qualitative.Pastel
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("이달에 기록된 지출 내역이 없습니다.")
+
 with tab3:
     if not df.empty:
-        st.subheader("📊 2026년 월별 총 흐름")
+        st.subheader("📅 연간 추이 리포트")
         df['월'] = df['날짜'].dt.strftime('%m월')
         year_sum = df.groupby('월')[['수입', '지출']].sum().reindex([f"{i:02d}월" for i in range(1, 13)]).fillna(0).reset_index()
         
-        # 월별 수입/지출 막대 그래프
         fig = go.Figure()
-        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['수입'], name='총 수입', marker_color='#1f77b4'))
-        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['지출'], name='총 지출', marker_color='#ff7f0e'))
-        fig.update_layout(barmode='group', template="plotly_white", margin=dict(t=40))
+        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['수입'], name='수입', marker_color='#1f77b4'))
+        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['지출'], name='지출', marker_color='#ff7f0e'))
+        fig.update_layout(barmode='group', template="plotly_white")
         st.plotly_chart(fig, use_container_width=True)
-
-        st.divider()
         
-        # 대분류별 지출 누적 추이 차트 (팀장님이 원하시던 그래프)
-        st.subheader("📈 연간 대분류별 지출 누적 추이")
-        exp_df = df[df['지출'] > 0].copy()
-        if not exp_df.empty:
-            cat_trend = exp_df.groupby(['월', '대분류'])['지출'].sum().reset_index()
-            fig2 = px.bar(cat_trend, x='월', y='지출', color='대분류', title="월별 지출 구성", text_auto='.2s')
-            fig2.update_layout(template="plotly_white", barmode='stack')
-            st.plotly_chart(fig2, use_container_width=True)
+        st.divider()
+        st.subheader("📈 연간 카테고리별 누적 지출")
+        cat_trend = df[df['지출'] > 0].groupby(['월', '대분류'])['지출'].sum().reset_index()
+        fig2 = px.bar(cat_trend, x='월', y='지출', color='대분류', title="월별 지출 구성", text_auto='.2s')
+        fig2.update_layout(template="plotly_white", barmode='stack')
+        st.plotly_chart(fig2, use_container_width=True)
