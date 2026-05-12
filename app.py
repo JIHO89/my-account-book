@@ -98,7 +98,6 @@ with st.sidebar.form("input_form", clear_on_submit=True):
             df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
             updated_df = pd.concat([df_all, new_row], ignore_index=True)
             
-            # 저장 에러 방지 로직 분리
             success = False
             try:
                 conn.update(spreadsheet=SHEET_URL, worksheet=0, data=updated_df)
@@ -213,7 +212,6 @@ with tab4:
             st.caption("단위: 원 (숫자만 입력)")
             c_j, c_h, c_s, c_c = st.columns(4)
             
-            # value=0, format="%d" 를 추가하여 소수점(.00)을 완벽히 제거했습니다.
             with c_j:
                 st.markdown("**👦 지호**")
                 j_1 = st.number_input("예적금", value=0, step=100000, format="%d", key='j1')
@@ -270,9 +268,10 @@ with tab4:
         st.divider()
         trend_copy = asset_df.copy()
         trend_copy['연월'] = trend_copy['날짜'].dt.strftime('%Y-%m')
-        monthly_trend = trend_copy.groupby('연월')['금액'].sum().reset_index()
+        # 시간순으로 정렬하여 그래프 꼬임 방지
+        monthly_trend = trend_copy.groupby('연월')['금액'].sum().reset_index().sort_values('연월')
         
-        # --- 현금화 및 비현금화 자산 계산 로직 ---
+        # --- 무조건 최신 날짜로 고정하는 핵심 로직 ---
         latest_date = asset_df['날짜'].max()
         latest_df = asset_df[asset_df['날짜'] == latest_date].copy()
         
@@ -285,7 +284,7 @@ with tab4:
         non_liquid_total = total_latest - liquid_total
         
         ac1, ac2, ac3 = st.columns(3)
-        ac1.metric(label=f"💎 총 자산 ({latest_date.strftime('%Y-%m-%d')})", value=f"{total_latest:,}원")
+        ac1.metric(label=f"💎 총 자산 ({latest_date.strftime('%Y년 %m월')} 기준)", value=f"{total_latest:,}원")
         ac2.metric(label="💸 현금화 가능 금액", value=f"{liquid_total:,}원", help="보증금, 보통예금, 예적금, 주식(수인 제외)")
         ac3.metric(label="🔒 비현금화 자산", value=f"{non_liquid_total:,}원", help="연금저축, 청약, 청년도약계좌, 수인 주식")
         
