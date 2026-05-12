@@ -268,14 +268,16 @@ with tab4:
         st.divider()
         trend_copy = asset_df.copy()
         trend_copy['연월'] = trend_copy['날짜'].dt.strftime('%Y-%m')
-        # 시간순으로 정렬하여 그래프 꼬임 방지
         monthly_trend = trend_copy.groupby('연월')['금액'].sum().reset_index().sort_values('연월')
         
-        # --- 무조건 최신 날짜로 고정하는 핵심 로직 ---
-        latest_date = asset_df['날짜'].max()
+        # --- 현금화 및 비현금화 자산 계산 로직 ---
+        # 1. 최신 데이터 추출
+        unique_dates = sorted(asset_df['날짜'].unique())
+        latest_date = unique_dates[-1]
         latest_df = asset_df[asset_df['날짜'] == latest_date].copy()
         
         liquid_items = ['보증금/기타', '보통예금', '국내주식', '해외주식', '예적금']
+        
         liquid_mask = latest_df['자산항목'].isin(liquid_items)
         suin_mask = (latest_df['소유자'] == '수인') & (latest_df['자산항목'].isin(['국내주식', '해외주식']))
         
@@ -283,11 +285,41 @@ with tab4:
         total_latest = latest_df['금액'].sum()
         non_liquid_total = total_latest - liquid_total
         
+        # 2. 직전(과거) 데이터 추출 및 비교(Delta) 계산
+        if len(unique_dates) > 1:
+            prev_date = unique_dates[-2]
+            prev_df = asset_df[asset_df['날짜'] == prev_date].copy()
+            
+            p_liquid_mask = prev_df['자산항목'].isin(liquid_items)
+            p_suin_mask = (prev_df['소유자'] == '수인') & (prev_df['자산항목'].isin(['국내주식', '해외주식']))
+            
+            prev_liquid = prev_df[p_liquid_mask & ~p_suin_mask]['금액'].sum()
+            prev_total = prev_df['금액'].sum()
+            prev_non_liquid = prev_total - prev_liquid
+            
+            delta_total = int(total_latest - prev_total)
+            delta_liquid = int(liquid_total - prev_liquid)
+            delta_non_liquid = int(non_liquid_total - prev_non_liquid)
+        else:
+            delta_total, delta_liquid, delta_non_liquid = None, None, None
+
+        # --- 상단 지표 표시 (Delta 기능 포함) ---
         ac1, ac2, ac3 = st.columns(3)
-        ac1.metric(label=f"💎 총 자산 ({latest_date.strftime('%Y년 %m월')} 기준)", value=f"{total_latest:,}원")
-        ac2.metric(label="💸 현금화 가능 금액", value=f"{liquid_total:,}원", help="보증금, 보통예금, 예적금, 주식(수인 제외)")
-        ac3.metric(label="🔒 비현금화 자산", value=f"{non_liquid_total:,}원", help="연금저축, 청약, 청년도약계좌, 수인 주식")
+        ac1.metric(label=f"💎 총 자산 ({pd.to_datetime(latest_date).strftime('%Y년 %m월')} 기준)", 
+                   value=f"{total_latest:,}원",
+                   delta=f"{delta_total:,}원" if delta_total is not None else None)
+                   
+        ac2.metric(label="💸 현금화 가능 금액", 
+                   value=f"{liquid_total:,}원", 
+                   delta=f"{delta_liquid:,}원" if delta_liquid is not None else None,
+                   help="보증금, 보통예금, 예적금, 주식(수인 제외)")
+                   
+        ac3.metric(label="🔒 비현금화 자산", 
+                   value=f"{non_liquid_total:,}원", 
+                   delta=f"{delta_non_liquid:,}원" if delta_non_liquid is not None else None,
+                   help="연금저축, 청약, 청년도약계좌, 수인 주식")
         
+        # 그래프
         fig_trend = px.area(monthly_trend, x='연월', y='금액', markers=True, title="월별 자산 성장 추이")
         fig_trend.update_traces(line_color='#2ca02c', fillcolor='rgba(44, 160, 44, 0.2)', hovertemplate='%{x}<br>%{y:,.0f}원')
         fig_trend.update_xaxes(type='category', title="조회 월") 
