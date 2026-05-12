@@ -25,7 +25,7 @@ def load_data():
         df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
         df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
-    except:
+    except Exception as e:
         return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
 
 # 자산 현황 데이터 로드
@@ -40,7 +40,7 @@ def load_asset_data():
         df = df.dropna(subset=['날짜'])
         df['금액'] = pd.to_numeric(df['금액'], errors='coerce').fillna(0).astype(int)
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
-    except:
+    except Exception as e:
         return pd.DataFrame(columns=['날짜', '소유자', '자산항목', '금액'])
 
 df = load_data()
@@ -101,8 +101,8 @@ with st.sidebar.form("input_form", clear_on_submit=True):
                 st.sidebar.success("✅ 저장 성공!")
                 st.cache_data.clear() 
                 st.rerun()
-            except:
-                st.sidebar.error("❌ 저장 실패")
+            except Exception as e:
+                st.sidebar.error(f"❌ 저장 실패: {e}")
 
 # --- 5. 메인 대시보드 ---
 st.title("💰 지호 & 정희 통합 가계부")
@@ -149,7 +149,8 @@ with tab1:
             try:
                 conn.update(spreadsheet=SHEET_URL, worksheet=0, data=final_df)
                 st.success("✅ 업데이트 완료!"); st.cache_data.clear(); st.rerun()
-            except: st.error("❌ 수정 실패")
+            except Exception as e:
+                st.error(f"❌ 수정 실패: {e}")
 
 with tab2:
     if not df.empty:
@@ -207,13 +208,19 @@ with tab4:
                 new_df = pd.DataFrame(new_rows, columns=['날짜', '소유자', '자산항목', '금액'])
                 try:
                     if not asset_df.empty:
-                        asset_df['날짜'] = asset_df['날짜'].dt.strftime('%Y-%m-%d')
-                        asset_df = asset_df[asset_df['날짜'] != d_str]
-                        final_asset_df = pd.concat([asset_df, new_df], ignore_index=True)
-                    else: final_asset_df = new_df
+                        # 원본 asset_df를 안전하게 복사하여 처리
+                        temp_asset_df = asset_df.copy()
+                        temp_asset_df['날짜'] = temp_asset_df['날짜'].dt.strftime('%Y-%m-%d')
+                        temp_asset_df = temp_asset_df[temp_asset_df['날짜'] != d_str]
+                        final_asset_df = pd.concat([temp_asset_df, new_df], ignore_index=True)
+                    else: 
+                        final_asset_df = new_df
                     conn.update(spreadsheet=SHEET_URL, worksheet="자산현황", data=final_asset_df)
-                    st.success("✅ 자산 기록 완료!"); st.cache_data.clear(); st.rerun()
-                except: st.error("❌ 저장 실패")
+                    st.success("✅ 자산 기록 완료!")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ 저장 실패: {e}")
 
     if not asset_df.empty:
         st.divider()
