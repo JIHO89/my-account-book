@@ -12,7 +12,7 @@ st.set_page_config(page_title="지호 & 정희 통합 가계부", layout="wide")
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1S4WUWBYV3bgi-Z7YA1wY3RXaRvY0w_8PEyOdkCxbiQo"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# 기존 가계부 데이터 로드 (첫 번째 시트)
+# 가계부 데이터 로드
 @st.cache_data(ttl=0)
 def load_data():
     try:
@@ -20,17 +20,15 @@ def load_data():
         df.columns = [str(c).strip() for c in df.columns]
         if df.empty:
             return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
-        
         df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
         df = df.dropna(subset=['날짜'])
         df['수입'] = pd.to_numeric(df['수입'], errors='coerce').fillna(0).astype(int)
         df['지출'] = pd.to_numeric(df['지출'], errors='coerce').fillna(0).astype(int)
-        
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
-    except Exception as e:
+    except:
         return pd.DataFrame(columns=['날짜', '대분류', '소분류', '항목', '수입', '지출', '결제자'])
 
-# 신규: 자산 현황 데이터 로드
+# 자산 현황 데이터 로드
 @st.cache_data(ttl=0)
 def load_asset_data():
     try:
@@ -38,12 +36,11 @@ def load_asset_data():
         df.columns = [str(c).strip() for c in df.columns]
         if df.empty:
             return pd.DataFrame(columns=['날짜', '소유자', '자산항목', '금액'])
-            
         df['날짜'] = pd.to_datetime(df['날짜'], errors='coerce')
         df = df.dropna(subset=['날짜'])
         df['금액'] = pd.to_numeric(df['금액'], errors='coerce').fillna(0).astype(int)
         return df.sort_values(by='날짜', ascending=False).reset_index(drop=True)
-    except Exception as e:
+    except:
         return pd.DataFrame(columns=['날짜', '소유자', '자산항목', '금액'])
 
 df = load_data()
@@ -90,7 +87,6 @@ with st.sidebar.form("input_form", clear_on_submit=True):
     item = st.text_input("상세 항목")
     inc = st.number_input("수입(원)", min_value=0, step=1000)
     exp = st.number_input("지출(원)", min_value=0, step=1000)
-    
     if st.form_submit_button("시트에 저장"):
         if not item:
             st.warning("상세 내역을 입력하세요.")
@@ -105,8 +101,8 @@ with st.sidebar.form("input_form", clear_on_submit=True):
                 st.sidebar.success("✅ 저장 성공!")
                 st.cache_data.clear() 
                 st.rerun()
-            except Exception as e:
-                st.sidebar.error(f"❌ 저장 실패: {e}")
+            except:
+                st.sidebar.error("❌ 저장 실패")
 
 # --- 5. 메인 대시보드 ---
 st.title("💰 지호 & 정희 통합 가계부")
@@ -118,43 +114,32 @@ col_config = {
     "지출": st.column_config.NumberColumn(format="%,d")
 }
 
-PASTEL_INC = "#AEC6CF" 
-PASTEL_EXP = "#FFB347" 
+PASTEL_INC, PASTEL_EXP = "#AEC6CF", "#FFB347"
 
 with tab1:
     if not df.empty:
         df['연월'] = df['날짜'].dt.strftime('%Y-%m')
-        all_months = sorted(df['연월'].unique(), reverse=True)
-        sel_m = st.selectbox("📅 월 선택", all_months)
+        sel_m = st.selectbox("📅 월 선택", sorted(df['연월'].unique(), reverse=True))
         m_df = df[df['연월'] == sel_m].copy()
-        
         c1, c2, c3 = st.columns(3)
         c1.metric("월 수입", f"{m_df['수입'].sum():,}원")
         c2.metric("월 지출", f"{m_df['지출'].sum():,}원")
         c3.metric("잔액", f"{m_df['수입'].sum() - m_df['지출'].sum():,}원")
-        
         st.divider()
         gc1, gc2 = st.columns(2)
         with gc1:
             if m_df['지출'].sum() > 0:
-                pie_exp = px.pie(m_df[m_df['지출']>0], values='지출', names='대분류', hole=0.3, 
-                                 title="지출 비중 (대분류)", color_discrete_sequence=px.colors.qualitative.Pastel)
-                pie_exp.update_traces(hovertemplate='%{label}<br>%{value:,.0f}원')
-                st.plotly_chart(pie_exp, use_container_width=True)
+                fig = px.pie(m_df[m_df['지출']>0], values='지출', names='대분류', hole=0.3, title="지출 비중", color_discrete_sequence=px.colors.qualitative.Pastel)
+                fig.update_traces(hovertemplate='%{label}<br>%{value:,.0f}원'); st.plotly_chart(fig, use_container_width=True)
         with gc2:
             if m_df['수입'].sum() > 0:
-                pie_inc = px.pie(m_df[m_df['수입']>0], values='수입', names='소분류', hole=0.3, 
-                                 title="수입 비중 (소분류)", color_discrete_sequence=px.colors.qualitative.Pastel)
-                pie_inc.update_traces(hovertemplate='%{label}<br>%{value:,.0f}원')
-                st.plotly_chart(pie_inc, use_container_width=True)
-        
-        st.subheader(f"📝 {sel_m} 상세 내역 확인 및 수정")
+                fig = px.pie(m_df[m_df['수입']>0], values='수입', names='소분류', hole=0.3, title="수입 비중", color_discrete_sequence=px.colors.qualitative.Pastel)
+                fig.update_traces(hovertemplate='%{label}<br>%{value:,.0f}원'); st.plotly_chart(fig, use_container_width=True)
+        st.subheader(f"📝 {sel_m} 상세 내역")
         m_df_edit = m_df.drop(columns=['연월']).copy()
         m_df_edit['날짜'] = m_df_edit['날짜'].dt.date
-
         edited_df = st.data_editor(m_df_edit, use_container_width=True, num_rows="dynamic", column_config=col_config, hide_index=True)
-        
-        if st.button("💾 변경사항 시트에 반영"):
+        if st.button("💾 변경사항 반영"):
             df_all = df.copy()
             df_all['날짜'] = df_all['날짜'].dt.strftime('%Y-%m-%d')
             other_data = df_all[df_all['날짜'].str.slice(0, 7) != sel_m]
@@ -163,166 +148,91 @@ with tab1:
             final_df = pd.concat([other_data, edited_df_save], ignore_index=True)
             try:
                 conn.update(spreadsheet=SHEET_URL, worksheet=0, data=final_df)
-                st.success("✅ 시트에 반영되었습니다!")
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ 수정 실패: {e}")
+                st.success("✅ 업데이트 완료!"); st.cache_data.clear(); st.rerun()
+            except: st.error("❌ 수정 실패")
 
 with tab2:
     if not df.empty:
-        st.subheader(f"🔍 {sel_m} 카테고리별 정밀 분석")
         exp_only = m_df[m_df['지출'] > 0].copy()
         if not exp_only.empty:
             m_sum = exp_only.groupby('대분류')['지출'].sum().sort_values(ascending=False).reset_index()
             sc1, sc2 = st.columns([1, 2])
             with sc1:
-                st.write("**항목별 지출 합계**")
                 st.dataframe(m_sum, column_config={"지출": st.column_config.NumberColumn(format="%,d")}, hide_index=True, use_container_width=True)
             with sc2:
-                selected_cat = st.selectbox("상세 정보를 볼 대분류를 선택하세요", m_sum['대분류'].unique())
-                drill_df = exp_only[exp_only['대분류'] == selected_cat]
-                pie_drill = px.pie(drill_df, values='지출', names='소분류', title=f"'{selected_cat}' 소분류 비중", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                pie_drill.update_traces(hovertemplate='%{label}<br>%{value:,.0f}원')
-                st.plotly_chart(pie_drill, use_container_width=True)
+                selected_cat = st.selectbox("대분류 선택", m_sum['대분류'].unique())
+                fig = px.pie(exp_only[exp_only['대분류'] == selected_cat], values='지출', names='소분류', title=f"'{selected_cat}' 소분류", hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
+                fig.update_traces(hovertemplate='%{label}<br>%{value:,.0f}원'); st.plotly_chart(fig, use_container_width=True)
 
 with tab3:
     if not df.empty:
-        total_inc = df['수입'].sum()
-        total_exp = df['지출'].sum()
-        total_bal = total_inc - total_exp
-        
-        st.subheader("📊 2026년 전체 누적 현황")
+        st.subheader("📊 2026 누적 현황")
         ac1, ac2, ac3 = st.columns(3)
-        ac1.metric("연간 총 수입", f"{total_inc:,}원")
-        ac2.metric("연간 총 지출", f"{total_exp:,}원")
-        ac3.metric("가계부 누적 잔액", f"{total_bal:,}원")
-        
+        ac1.metric("총 수입", f"{df['수입'].sum():,}원"); ac2.metric("총 지출", f"{df['지출'].sum():,}원"); ac3.metric("누적 잔액", f"{(df['수입'].sum()-df['지출'].sum()):,}원")
         st.divider()
-        
-        st.subheader("📅 월별 수입 vs 지출 추이")
         df['월'] = df['날짜'].dt.strftime('%m월')
         year_sum = df.groupby('월')[['수입', '지출']].sum().reindex([f"{i:02d}월" for i in range(1, 13)]).fillna(0).reset_index()
-        
         fig = go.Figure()
-        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['수입'], name='수입', marker_color=PASTEL_INC, hovertemplate='%{x}: %{y:,.0f}원<extra></extra>'))
-        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['지출'], name='지출', marker_color=PASTEL_EXP, hovertemplate='%{x}: %{y:,.0f}원<extra></extra>'))
-        fig.update_layout(barmode='group', template="plotly_white", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-        fig.update_yaxes(tickformat=",") 
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.divider()
-        
-        st.subheader("📈 연간 카테고리별 누적 지출")
-        cat_trend = df[df['지출'] > 0].groupby(['월', '대분류'])['지출'].sum().reset_index()
-        fig2 = px.bar(cat_trend, x='월', y='지출', color='대분류', title="월별 지출 구성", text_auto=',', color_discrete_sequence=px.colors.qualitative.Pastel)
-        fig2.update_layout(template="plotly_white", barmode='stack')
-        fig2.update_yaxes(tickformat=",")
-        fig2.update_traces(hovertemplate='%{x} - %{color}<br>%{y:,.0f}원')
-        st.plotly_chart(fig2, use_container_width=True)
+        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['수입'], name='수입', marker_color=PASTEL_INC, hovertemplate='%{y:,.0f}원'))
+        fig.add_trace(go.Bar(x=year_sum['월'], y=year_sum['지출'], name='지출', marker_color=PASTEL_EXP, hovertemplate='%{y:,.0f}원'))
+        fig.update_layout(barmode='group', template="plotly_white"); fig.update_yaxes(tickformat=","); st.plotly_chart(fig, use_container_width=True)
 
-# 신규: 4. 자산 추이 탭
 with tab4:
     st.subheader("📈 우리가 모은 돈 (총 자산 추이)")
-    st.caption("매월 1일, 흩어져 있는 자산을 모아 기록하고 쑥쑥 자라나는 성장을 확인하세요!")
-    
     asset_df = load_asset_data()
     
-    # 자산 입력 폼 (이전에 입력한 값을 유지하도록 clear_on_submit=False 설정)
     with st.expander("➕ 이달의 자산 기록하기", expanded=True):
         with st.form("asset_input_form", clear_on_submit=False):
-            # 매월 1일을 기본값으로 세팅
             a_date = st.date_input("기준일", datetime.now().replace(day=1))
-            st.caption("단위: 원 (숫자만 입력하세요)")
-            
-            # 올려주신 엑셀 표와 동일한 구조
+            st.caption("단위: 원 (숫자만 입력)")
             c_j, c_h, c_s, c_c = st.columns(4)
             with c_j:
                 st.markdown("**👦 지호**")
-                j_1 = st.number_input("예적금/연금", step=100000, key='j1')
-                j_2 = st.number_input("청약", step=100000, key='j2')
-                j_3 = st.number_input("보통예금", step=100000, key='j3')
-                j_4 = st.number_input("국내주식", step=100000, key='j4')
-                j_5 = st.number_input("해외주식", step=100000, key='j5')
+                j_1, j_p, j_2, j_3, j_4, j_5 = st.number_input("예적금", key='j1'), st.number_input("연금저축", key='jp'), st.number_input("청약", key='j2'), st.number_input("보통예금", key='j3'), st.number_input("국내주식", key='j4'), st.number_input("해외주식", key='j5')
             with c_h:
                 st.markdown("**👩 정희**")
-                h_1 = st.number_input("예적금/연금", step=100000, key='h1')
-                h_2 = st.number_input("청약", step=100000, key='h2')
-                h_3 = st.number_input("청년도약계좌", step=100000, key='h3')
-                h_4 = st.number_input("보통예금", step=100000, key='h4')
-                h_5 = st.number_input("국내주식", step=100000, key='h5')
+                h_1, h_p, h_2, h_3, h_4, h_5 = st.number_input("예적금", key='h1'), st.number_input("연금저축", key='hp'), st.number_input("청약", key='h2'), st.number_input("청년도약계좌", key='h3'), st.number_input("보통예금", key='h4'), st.number_input("국내주식", key='h5')
             with c_s:
                 st.markdown("**👶 수인**")
-                s_1 = st.number_input("국내주식", step=100000, key='s1')
-                s_2 = st.number_input("해외주식", step=100000, key='s2')
+                s_1, s_2 = st.number_input("수인 국내주식", key='s1'), st.number_input("수인 해외주식", key='s2')
             with c_c:
                 st.markdown("**🏠 공통**")
-                c_1 = st.number_input("보증금/기타", step=1000000, key='c1')
+                c_1 = st.number_input("보증금/기타", key='c1')
             
             if st.form_submit_button("💾 자산 현황 저장"):
                 d_str = a_date.strftime('%Y-%m-%d')
-                new_rows = [
-                    [d_str, '지호', '예적금/연금저축', j_1], [d_str, '지호', '청약', j_2], [d_str, '지호', '보통예금', j_3], [d_str, '지호', '국내주식', j_4], [d_str, '지호', '해외주식', j_5],
-                    [d_str, '정희', '예적금/연금저축', h_1], [d_str, '정희', '청약', h_2], [d_str, '정희', '청년도약계좌', h_3], [d_str, '정희', '보통예금', h_4], [d_str, '정희', '국내주식', h_5],
-                    [d_str, '수인', '국내주식', s_1], [d_str, '수인', '해외주식', s_2],
-                    [d_str, '공통', '보증금/기타', c_1]
-                ]
-                
+                new_rows = [[d_str, '지호', '예적금', j_1], [d_str, '지호', '연금저축', j_p], [d_str, '지호', '청약', j_2], [d_str, '지호', '보통예금', j_3], [d_str, '지호', '국내주식', j_4], [d_str, '지호', '해외주식', j_5],
+                            [d_str, '정희', '예적금', h_1], [d_str, '정희', '연금저축', h_p], [d_str, '정희', '청약', h_2], [d_str, '정희', '청년도약계좌', h_3], [d_str, '정희', '보통예금', h_4], [d_str, '정희', '국내주식', h_5],
+                            [d_str, '수인', '국내주식', s_1], [d_str, '수인', '해외주식', s_2], [d_str, '공통', '보증금/기타', c_1]]
                 new_df = pd.DataFrame(new_rows, columns=['날짜', '소유자', '자산항목', '금액'])
-                
                 try:
                     if not asset_df.empty:
                         asset_df['날짜'] = asset_df['날짜'].dt.strftime('%Y-%m-%d')
-                        # 같은 날짜에 다시 저장하면 기존 데이터를 덮어씌움
                         asset_df = asset_df[asset_df['날짜'] != d_str]
                         final_asset_df = pd.concat([asset_df, new_df], ignore_index=True)
-                    else:
-                        final_asset_df = new_df
-                        
+                    else: final_asset_df = new_df
                     conn.update(spreadsheet=SHEET_URL, worksheet="자산현황", data=final_asset_df)
-                    st.success("✅ 새로운 자산 기록이 멋지게 저장되었습니다!")
-                    st.cache_data.clear()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ 저장 실패: {e}")
+                    st.success("✅ 자산 기록 완료!"); st.cache_data.clear(); st.rerun()
+                except: st.error("❌ 저장 실패")
 
-    # 자산 대시보드 시각화
     if not asset_df.empty:
         st.divider()
+        # 월 단위 그룹화 핵심 로직
+        trend_copy = asset_df.copy()
+        trend_copy['연월'] = trend_copy['날짜'].dt.strftime('%Y-%m')
+        monthly_trend = trend_copy.groupby('연월')['금액'].sum().reset_index()
         
-        # 날짜별 총 자산 계산
-        trend_df = asset_df.groupby('날짜')['금액'].sum().reset_index()
-        trend_df['날짜_str'] = trend_df['날짜'].dt.strftime('%Y-%m')
+        st.metric(label=f"💎 현재 우리 가족 총 자산 ({asset_df['날짜'].max().strftime('%Y-%m-%d')} 기준)", value=f"{monthly_trend.iloc[-1]['금액']:,}원")
         
-        latest_date = trend_df['날짜'].max()
-        latest_total = trend_df[trend_df['날짜'] == latest_date]['금액'].values[0]
-        
-        # 이전 달과 비교
-        delta = 0
-        if len(trend_df) > 1:
-            prev_total = trend_df.sort_values(by='날짜', ascending=False).iloc[1]['금액']
-            delta = latest_total - prev_total
-            
-        st.metric(label=f"💎 현재 우리 가족 총 자산 ({latest_date.strftime('%Y-%m-%d')} 기준)", 
-                  value=f"{latest_total:,.0f}원", 
-                  delta=f"{delta:,.0f}원 (지난 기록 대비)")
-        
-        st.subheader("🚀 2026년 자산 성장 그래프")
-        fig_trend = px.area(trend_df, x='날짜_str', y='금액', markers=True, title="시간이 지날수록 불어나는 총액")
+        # 그래프: X축을 연월 단위로 변경
+        fig_trend = px.area(monthly_trend, x='연월', y='금액', markers=True, title="월별 자산 성장 추이")
         fig_trend.update_traces(line_color='#2ca02c', fillcolor='rgba(44, 160, 44, 0.2)', hovertemplate='%{x}<br>%{y:,.0f}원')
-        fig_trend.update_layout(template="plotly_white")
-        fig_trend.update_yaxes(tickformat=",")
+        fig_trend.update_xaxes(type='category', title="조회 월") # 일 단위 제거를 위해 카테고리형으로 설정
+        fig_trend.update_yaxes(tickformat=","); fig_trend.update_layout(template="plotly_white")
         st.plotly_chart(fig_trend, use_container_width=True)
         
-        # 엑셀과 비슷한 형태로 표 요약 (가장 최근 기준)
         st.subheader("📋 가장 최근 자산 상세 요약")
-        latest_df = asset_df[asset_df['날짜'] == latest_date].copy()
-        
-        # 보기 편하게 소유자를 열(Column)로, 자산항목을 행(Row)으로 변환
+        latest_df = asset_df[asset_df['날짜'] == asset_df['날짜'].max()].copy()
         pivot_df = latest_df.pivot_table(index='자산항목', columns='소유자', values='금액', aggfunc='sum').fillna(0)
-        
-        # 총계 컬럼 추가
         pivot_df['총계'] = pivot_df.sum(axis=1)
-        
-        # 원단위 포맷팅하여 표 출력
         st.dataframe(pivot_df.style.format("{:,.0f}원"), use_container_width=True)
