@@ -217,22 +217,37 @@ with tab4:
 
     if not asset_df.empty:
         st.divider()
-        # 월 단위 그룹화 핵심 로직
         trend_copy = asset_df.copy()
         trend_copy['연월'] = trend_copy['날짜'].dt.strftime('%Y-%m')
         monthly_trend = trend_copy.groupby('연월')['금액'].sum().reset_index()
         
-        st.metric(label=f"💎 현재 우리 가족 총 자산 ({asset_df['날짜'].max().strftime('%Y-%m-%d')} 기준)", value=f"{monthly_trend.iloc[-1]['금액']:,}원")
+        # --- 현금화 가능 자산 계산 로직 추가 ---
+        latest_date = asset_df['날짜'].max()
+        latest_df = asset_df[asset_df['날짜'] == latest_date].copy()
+        
+        # 1. 계산 대상 항목 추출 (보증금, 보통예금, 국내주식, 해외주식)
+        liquid_items = ['보증금/기타', '보통예금', '국내주식', '해외주식']
+        liquid_mask = latest_df['자산항목'].isin(liquid_items)
+        
+        # 2. 수인이의 주식 제외 조건
+        suin_mask = (latest_df['소유자'] == '수인') & (latest_df['자산항목'].isin(['국내주식', '해외주식']))
+        
+        # 3. 최종 계산 (대상 항목이면서 수인이 주식이 아닌 것 합산)
+        liquid_total = latest_df[liquid_mask & ~suin_mask]['금액'].sum()
+        
+        # --- 상단 지표 표시 (총 자산 옆에 현금화 가능 금액 추가) ---
+        ac1, ac2 = st.columns(2)
+        ac1.metric(label=f"💎 현재 우리 가족 총 자산 ({latest_date.strftime('%Y-%m-%d')} 기준)", value=f"{monthly_trend.iloc[-1]['금액']:,}원")
+        ac2.metric(label="💸 당장 현금화 가능한 금액", value=f"{liquid_total:,}원", help="보증금, 보통예금, 주식(수인이 제외) 합산")
         
         # 그래프: X축을 연월 단위로 변경
         fig_trend = px.area(monthly_trend, x='연월', y='금액', markers=True, title="월별 자산 성장 추이")
         fig_trend.update_traces(line_color='#2ca02c', fillcolor='rgba(44, 160, 44, 0.2)', hovertemplate='%{x}<br>%{y:,.0f}원')
-        fig_trend.update_xaxes(type='category', title="조회 월") # 일 단위 제거를 위해 카테고리형으로 설정
+        fig_trend.update_xaxes(type='category', title="조회 월") 
         fig_trend.update_yaxes(tickformat=","); fig_trend.update_layout(template="plotly_white")
         st.plotly_chart(fig_trend, use_container_width=True)
         
         st.subheader("📋 가장 최근 자산 상세 요약")
-        latest_df = asset_df[asset_df['날짜'] == asset_df['날짜'].max()].copy()
         pivot_df = latest_df.pivot_table(index='자산항목', columns='소유자', values='금액', aggfunc='sum').fillna(0)
         pivot_df['총계'] = pivot_df.sum(axis=1)
         st.dataframe(pivot_df.style.format("{:,.0f}원"), use_container_width=True)
