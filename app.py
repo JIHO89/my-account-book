@@ -221,21 +221,26 @@ with tab4:
         trend_copy['연월'] = trend_copy['날짜'].dt.strftime('%Y-%m')
         monthly_trend = trend_copy.groupby('연월')['금액'].sum().reset_index()
         
-        # --- 현금화 가능 자산 계산 로직 업데이트 ---
+        # --- 현금화 및 비현금화 자산 계산 로직 ---
         latest_date = asset_df['날짜'].max()
         latest_df = asset_df[asset_df['날짜'] == latest_date].copy()
         
-        # '예적금' 항목 추가 포함
+        # 1. 현금화 가능 항목
         liquid_items = ['보증금/기타', '보통예금', '국내주식', '해외주식', '예적금']
         liquid_mask = latest_df['자산항목'].isin(liquid_items)
         suin_mask = (latest_df['소유자'] == '수인') & (latest_df['자산항목'].isin(['국내주식', '해외주식']))
         
         liquid_total = latest_df[liquid_mask & ~suin_mask]['금액'].sum()
         
-        # 상단 지표
-        ac1, ac2 = st.columns(2)
-        ac1.metric(label=f"💎 현재 우리 가족 총 자산 ({latest_date.strftime('%Y-%m-%d')} 기준)", value=f"{monthly_trend.iloc[-1]['금액']:,}원")
-        ac2.metric(label="💸 당장 현금화 가능한 금액", value=f"{liquid_total:,}원", help="보증금, 보통예금, 예적금, 주식(수인이 제외) 합산")
+        # 2. 비현금화 가능 항목 (전체 - 현금화가능)
+        total_latest = latest_df['금액'].sum()
+        non_liquid_total = total_latest - liquid_total
+        
+        # --- 상단 지표 표시 (3단 구성) ---
+        ac1, ac2, ac3 = st.columns(3)
+        ac1.metric(label=f"💎 총 자산 ({latest_date.strftime('%Y-%m-%d')})", value=f"{total_latest:,}원")
+        ac2.metric(label="💸 현금화 가능 금액", value=f"{liquid_total:,}원", help="보증금, 보통예금, 예적금, 주식(수인 제외)")
+        ac3.metric(label="🔒 비현금화 자산", value=f"{non_liquid_total:,}원", help="연금저축, 청약, 청년도약계좌, 수인 주식")
         
         # 그래프
         fig_trend = px.area(monthly_trend, x='연월', y='금액', markers=True, title="월별 자산 성장 추이")
